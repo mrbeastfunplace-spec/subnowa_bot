@@ -29,6 +29,8 @@ from db.models import (
 
 
 _CATEGORY_SLUG_MAX_LENGTH = 64
+_LEGACY_UI_SYNC_SETTING_KEY = "system.legacy_ui_sync_version"
+_LEGACY_UI_SYNC_VERSION = "2026-04-11-legacy-ui-v2"
 _REPLACEABLE_TEXT_DEFAULTS: dict[str, dict[str, str]] = {
     "user.main_title": {"ru": "Subnowa", "uz": "Subnowa", "en": "Subnowa"},
     "user.main_body": {"ru": "Выберите раздел ниже.", "uz": "Quyidagi bo'limlardan birini tanlang.", "en": "Choose a section below."},
@@ -250,6 +252,7 @@ async def initialize_database(
         await seed_payment_methods(session)
         await seed_texts(session)
         await seed_layouts(session, settings)
+        await sync_legacy_ui_once(session, settings)
         await seed_product_payment_links(session)
         await session.commit()
 
@@ -372,8 +375,9 @@ async def seed_payment_methods(session: AsyncSession) -> None:
                 translation.instructions = payload["instructions"]
 
 
-async def seed_texts(session: AsyncSession) -> None:
+async def seed_texts(session: AsyncSession, force_codes: set[str] | None = None) -> None:
     for code, payload in DEFAULT_TEXTS.items():
+        force_restore = force_codes is not None and code in force_codes
         entry = await session.scalar(select(TextEntry).where(TextEntry.code == code))
         if entry is None:
             entry = TextEntry(code=code)
@@ -391,11 +395,11 @@ async def seed_texts(session: AsyncSession) -> None:
                 translation.value = value
                 continue
             replaceable_default = _REPLACEABLE_TEXT_DEFAULTS.get(code, {}).get(lang_code)
-            if _should_replace_seed_text(translation.value, replaceable_default):
+            if force_restore or _should_replace_seed_text(translation.value, replaceable_default):
                 translation.value = value
 
 
-async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
+async def seed_layouts(session: AsyncSession, settings: Settings, force_codes: set[str] | None = None) -> None:
     replacement_map = {
         "__SUPPORT_URL__": settings.support_url,
         "__ABOUT_URL__": settings.about_url,
@@ -403,10 +407,15 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
     }
 
     for item in DEFAULT_LAYOUTS:
+        force_restore = force_codes is not None and item["code"] in force_codes
         layout = await session.scalar(select(Layout).where(Layout.code == item["code"]))
         if layout is None:
             layout = Layout(code=item["code"])
             session.add(layout)
+            layout.title = item["title"]
+            layout.scope = item["scope"]
+            layout.is_active = True
+        elif force_restore:
             layout.title = item["title"]
             layout.scope = item["scope"]
             layout.is_active = True
@@ -424,10 +433,15 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
                 button.sort_order = button_data["sort_order"]
                 button.is_active = True
             else:
-                if not button.action_value:
+                if force_restore or not button.action_value:
+                    button.action_type = ButtonActionType(button_data["action_type"])
                     button.action_value = replacement_map.get(button_data["action_value"], button_data["action_value"])
-                if not button.style:
+                if force_restore or not button.style:
                     button.style = button_data["style"]
+                if force_restore:
+                    button.row_index = button_data["row_index"]
+                    button.sort_order = button_data["sort_order"]
+                    button.is_active = True
 
             existing_translations = {tr.language.value: tr for tr in button.translations}
             for lang_code, text in button_data["translations"].items():
@@ -438,8 +452,24 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
                     translation.text = text
                     continue
                 replaceable_default = _REPLACEABLE_LAYOUT_DEFAULTS.get((item["code"], button_data["code"]), {}).get(lang_code)
-                if _should_replace_seed_text(translation.text, replaceable_default):
+                if force_restore or _should_replace_seed_text(translation.text, replaceable_default):
                     translation.text = text
+
+
+async def sync_legacy_ui_once(session: AsyncSession, settings: Settings) -> None:
+    marker = await session.scalar(select(Setting).where(Setting.key == _LEGACY_UI_SYNC_SETTING_KEY))
+    if marker is not None and marker.value == _LEGACY_UI_SYNC_VERSION:
+        return
+
+    await seed_texts(session, force_codes=set(DEFAULT_TEXTS))
+    await seed_layouts(session, settings, force_codes={item["code"] for item in DEFAULT_LAYOUTS})
+
+    if marker is None:
+        marker = Setting(key=_LEGACY_UI_SYNC_SETTING_KEY)
+        session.add(marker)
+    marker.value = _LEGACY_UI_SYNC_VERSION
+    marker.value_type = "string"
+    marker.description = "One-time legacy UI sync marker"
 
 
 async def seed_product_payment_links(session: AsyncSession) -> None:

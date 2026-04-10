@@ -11,7 +11,9 @@ from db.base import OrderStatus
 from handlers.common import (
     categories_markup,
     gmail_choice_markup,
+    payment_back_markup,
     payment_methods_markup,
+    profile_markup,
     product_markup,
     products_markup,
 )
@@ -45,7 +47,7 @@ def _subscription_markup(channel_url: str, callback_data: str, language: str) ->
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text=subscribe, url=channel_url)],
-            [InlineKeyboardButton(text=check, callback_data=callback_data)],
+            [InlineKeyboardButton(text=check, callback_data=callback_data, style="success")],
             [InlineKeyboardButton(text=_menu_text(language), callback_data="menu:main")],
         ]
     )
@@ -122,7 +124,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             render_product_text(product, language),
-            reply_markup=product_markup(product, language, include_trial=include_trial),
+            reply_markup=product_markup(product, language, include_trial=include_trial, support_url=app.settings.support_url),
         )
 
     @router.callback_query(F.data == "product:trial")
@@ -135,12 +137,22 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if user and await user_has_trial(session, user.id):
                 text = await format_text(session, "user.trial_already_used", language, fallback="Пробная подписка уже использована.")
                 await callback.answer()
-                await answer_or_edit(callback, text, reply_markup=product_markup(product, language, include_trial=True) if product else None)
+                await answer_or_edit(
+                    callback,
+                    text,
+                    reply_markup=product_markup(product, language, include_trial=True, support_url=app.settings.support_url) if product else None,
+                )
                 return
         await state.set_state(UserFlowState.waiting_trial_gmail)
         await state.update_data(product_id=product.id if product else None)
         await callback.answer()
-        await answer_or_edit(callback, prompt, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=_back_text(language), callback_data="menu:catalog")]]))
+        await answer_or_edit(
+            callback,
+            prompt,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text=_back_text(language), callback_data="menu:catalog", style="danger")]]
+            ),
+        )
 
     @router.message(UserFlowState.waiting_trial_gmail)
     async def trial_gmail_handler(message: Message, state: FSMContext) -> None:
@@ -148,7 +160,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
             if not _is_valid_gmail(gmail):
-                await message.answer("Нужен корректный Gmail.")
+                invalid_text = await format_text(session, "user.invalid_gmail", language, fallback="Введите корректный Gmail в формате name@gmail.com.")
+                await message.answer(invalid_text)
                 return
             required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
             prompt = await format_text(session, "user.trial_subscribe", language, fallback="Подпишитесь на канал.")
@@ -211,7 +224,16 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if product.workflow_type == "capcut_auto" and await count_free_accounts(session) <= 0:
                 text = await format_text(session, "user.stock_empty", language, fallback="Склад пуст.")
                 await callback.answer()
-                await answer_or_edit(callback, text, reply_markup=product_markup(product, language))
+                await answer_or_edit(
+                    callback,
+                    text,
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text=_menu_text(language), callback_data="menu:main")],
+                            [InlineKeyboardButton(text="💬 Задать вопрос" if language == "ru" else ("💬 Savol berish" if language == "uz" else "💬 Support"), url=app.settings.support_url)],
+                        ]
+                    ),
+                )
                 return
             if product.workflow_type == "chatgpt_manual":
                 saved_gmail = await get_last_chatgpt_gmail(session, user.id)
@@ -225,7 +247,13 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 await state.set_state(UserFlowState.waiting_chatgpt_gmail)
                 await state.update_data(product_id=product.id)
                 await callback.answer()
-                await answer_or_edit(callback, prompt, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=_back_text(language), callback_data=f"product:view:{product.id}")]]))
+                await answer_or_edit(
+                    callback,
+                    prompt,
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[[InlineKeyboardButton(text=_back_text(language), callback_data=f"product:view:{product.id}", style="danger")]]
+                    ),
+                )
                 return
             order = await create_order(session, user=user, product=product, language=language)
             methods = await list_product_payment_methods(session, product)
@@ -236,7 +264,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
-            reply_markup=payment_methods_markup(order.id, methods, language),
+            reply_markup=payment_methods_markup(order.id, methods, language, app.settings.support_url, allow_promo=True),
         )
         await _notify_admins(
             bot,
@@ -300,16 +328,23 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await state.set_state(UserFlowState.waiting_chatgpt_gmail)
         await state.update_data(product_id=product_id)
         await callback.answer()
-        await answer_or_edit(callback, prompt)
+        await answer_or_edit(
+            callback,
+            prompt,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text=_back_text(language), callback_data=f"product:view:{product_id}", style="danger")]]
+            ),
+        )
 
     @router.message(UserFlowState.waiting_chatgpt_gmail)
     async def chatgpt_gmail_handler(message: Message, state: FSMContext) -> None:
         gmail = (message.text or "").strip()
-        if not _is_valid_gmail(gmail):
-            await message.answer("Нужен корректный Gmail.")
-            return
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            if not _is_valid_gmail(gmail):
+                invalid_text = await format_text(session, "user.invalid_gmail", language, fallback="Введите корректный Gmail в формате name@gmail.com.")
+                await message.answer(invalid_text)
+                return
             prompt = await format_text(session, "user.trial_subscribe", language, fallback="Подпишитесь на канал.")
             required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
         await state.update_data(gmail=gmail)
@@ -340,13 +375,81 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await session.commit()
         await state.clear()
         await callback.answer()
-        await answer_or_edit(callback, f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}", reply_markup=payment_methods_markup(order.id, methods, language))
+        await answer_or_edit(
+            callback,
+            f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
+            reply_markup=payment_methods_markup(order.id, methods, language, app.settings.support_url, allow_promo=True),
+        )
         await _notify_admins(
             bot,
             app,
             f"Новый заказ ChatGPT\n\nЗаказ: <code>{order_display_number(order)}</code>\nПользователь: <b>{escape(user_display_name(callback.from_user, callback.from_user.id))}</b>\nGmail: {escape(gmail)}",
             order.id,
         )
+
+    @router.callback_query(F.data.startswith("order:payment_methods:"))
+    async def order_payment_methods_handler(callback: CallbackQuery) -> None:
+        order_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, order_id)
+            if order is None or order.product is None:
+                await callback.answer()
+                return
+            methods = await list_product_payment_methods(session, order.product)
+            payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
+            reply_markup=payment_methods_markup(order.id, methods, language, app.settings.support_url, allow_promo=True),
+        )
+
+    @router.callback_query(F.data.startswith("order:promo:"))
+    async def order_promo_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        order_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            prompt = await format_text(session, "user.promo_enter", language, fallback="Введите промокод.")
+        await state.set_state(UserFlowState.waiting_promo_code)
+        await state.update_data(promo_return=f"payment:{order_id}")
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            prompt,
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text=_back_text(language), callback_data=f"order:payment_methods:{order_id}", style="danger")]]
+            ),
+        )
+
+    @router.message(UserFlowState.waiting_promo_code)
+    async def promo_code_handler(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        return_to = data.get("promo_return", "profile")
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            invalid_text = await format_text(session, "user.promo_invalid", language, fallback="К сожалению, такого промокода не существует.")
+            await state.clear()
+            await message.answer(invalid_text)
+            if return_to == "profile":
+                title = await format_text(session, "user.profile_title", language, fallback="Ваш профиль")
+                display_name = escape(user_display_name(message.from_user, message.from_user.id))
+                await message.answer(
+                    f"<b>{title}</b>\n\nПользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
+                    reply_markup=profile_markup(language, app.settings.support_url),
+                )
+                return
+            if isinstance(return_to, str) and return_to.startswith("payment:"):
+                order_id = int(return_to.split(":")[-1])
+                order = await get_order_by_id(session, order_id)
+                if order is None or order.product is None:
+                    return
+                methods = await list_product_payment_methods(session, order.product)
+                payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
+                await message.answer(
+                    f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
+                    reply_markup=payment_methods_markup(order.id, methods, language, app.settings.support_url, allow_promo=True),
+                )
 
     @router.callback_query(F.data.startswith("order:pay:"))
     async def order_payment_method_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -368,12 +471,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             f"<b>{payment_method.admin_title}</b>\n\n{instruction}\n\n{payment_prompt}",
-            reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text="Отмена", callback_data=f"order:cancel:{order_id}")],
-                    [InlineKeyboardButton(text=_menu_text(language), callback_data="menu:main")],
-                ]
-            ),
+            reply_markup=payment_back_markup(int(order_id), language, app.settings.support_url),
         )
 
     @router.callback_query(F.data.startswith("order:cancel:"))

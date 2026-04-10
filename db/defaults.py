@@ -268,6 +268,20 @@ DEFAULT_TEXTS = {
         "description": "History title",
         "translations": {"ru": "История заказов", "uz": "Buyurtmalar tarixi", "en": "Order history"},
     },
+    "user.promo_enter": {
+        "group": "user",
+        "description": "Promo code prompt",
+        "translations": {"ru": "Введите промокод.", "uz": "Promokodni kiriting.", "en": "Enter promo code."},
+    },
+    "user.promo_invalid": {
+        "group": "user",
+        "description": "Promo code invalid",
+        "translations": {
+            "ru": "К сожалению, такого промокода не существует.",
+            "uz": "Afsuski, bunday promokod mavjud emas.",
+            "en": "Sorry, this promo code does not exist.",
+        },
+    },
     "user.faq_title": {
         "group": "user",
         "description": "FAQ title",
@@ -414,6 +428,15 @@ DEFAULT_TEXTS = {
         "group": "user",
         "description": "Trial Gmail prompt",
         "translations": {"ru": "Введите Gmail для подключения ChatGPT.", "uz": "ChatGPT uchun Gmail kiriting.", "en": "Enter your Gmail for ChatGPT activation."},
+    },
+    "user.invalid_gmail": {
+        "group": "user",
+        "description": "Invalid Gmail input",
+        "translations": {
+            "ru": "Введите корректный Gmail в формате name@gmail.com.",
+            "uz": "Gmailni name@gmail.com formatida to‘g‘ri kiriting.",
+            "en": "Enter a valid Gmail in the format name@gmail.com.",
+        },
     },
     "user.trial_subscribe": {
         "group": "user",

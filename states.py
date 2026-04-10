@@ -4,6 +4,7 @@ from aiogram.fsm.state import State, StatesGroup
 class UserFlowState(StatesGroup):
     waiting_chatgpt_gmail = State()
     waiting_trial_gmail = State()
+    waiting_promo_code = State()
     waiting_custom_request = State()
     waiting_payment_proof = State()
 

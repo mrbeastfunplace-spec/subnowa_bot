@@ -3,12 +3,14 @@ from __future__ import annotations
 from html import escape
 
 from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
-from handlers.common import completed_orders_markup, order_detail_markup
+from handlers.common import completed_orders_markup, order_detail_markup, profile_markup
 from services.context import AppContext
 from services.texts import format_text
 from services.users import get_user_by_telegram_id, get_user_language, list_completed_orders_for_user
+from states import UserFlowState
 from utils.formatting import format_money, order_display_number, order_status_label, user_display_name
 from utils.messages import answer_or_edit
 
@@ -22,17 +24,26 @@ def build_profile_router(app: AppContext) -> Router:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             title = await format_text(session, "user.profile_title", language, fallback="Профиль")
         display_name = escape(user_display_name(callback.from_user, callback.from_user.id))
-        history_text = "📜 История заказов" if language == "ru" else ("📜 Buyurtmalar tarixi" if language == "uz" else "📜 Order history")
-        menu_text = "🏠 Меню" if language == "ru" else ("🏠 Menyu" if language == "uz" else "🏠 Menu")
         await callback.answer()
         await answer_or_edit(
             callback,
             f"<b>{title}</b>\n\nПользователь: <b>{display_name}</b>\nID: <code>{callback.from_user.id}</code>",
+            reply_markup=profile_markup(language, app.settings.support_url),
+        )
+
+    @router.callback_query(F.data == "profile:promo")
+    async def profile_promo_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            prompt = await format_text(session, "user.promo_enter", language, fallback="Введите промокод.")
+        await state.set_state(UserFlowState.waiting_promo_code)
+        await state.update_data(promo_return="profile")
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            prompt,
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[
-                    [InlineKeyboardButton(text=history_text, callback_data="profile:history")],
-                    [InlineKeyboardButton(text=menu_text, callback_data="menu:main")],
-                ]
+                inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="menu:profile", style="danger")]]
             ),
         )
 
@@ -50,7 +61,7 @@ def build_profile_router(app: AppContext) -> Router:
                 callback,
                 empty_text,
                 reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="menu:profile")]]
+                    inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="menu:profile", style="danger")]]
                 ),
             )
             return

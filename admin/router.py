@@ -27,6 +27,7 @@ from utils.translations import pick_translation
 
 def build_admin_router(app: AppContext, bot: Bot) -> Router:
     router = Router(name="admin")
+    live_layout_codes = {"main_menu", "admin_main"}
 
     def _guard(user_id: int) -> bool:
         return app.is_admin(user_id)
@@ -779,9 +780,17 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             await callback.answer()
             return
         async with app.session_factory() as session:
-            layouts = await list_layouts(session)
+            layouts = [layout for layout in await list_layouts(session) if layout.code in live_layout_codes]
         await callback.answer()
-        await answer_or_edit(callback, "<b>Лейауты</b>", reply_markup=_layouts_markup(layouts))
+        await answer_or_edit(
+            callback,
+            (
+                "<b>Кнопки</b>\n\n"
+                "Здесь редактируются только живые layout-экраны: главное меню пользователя и админка.\n"
+                "Кнопки каталога, оплаты и профиля пока задаются кодом и не меняются из этого раздела."
+            ),
+            reply_markup=_layouts_markup(layouts),
+        )
 
     @router.callback_query(F.data.regexp(r"^admin:layout:\d+$"))
     async def admin_layout_detail_handler(callback: CallbackQuery) -> None:
@@ -794,11 +803,23 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         if layout is None:
             await callback.answer()
             return
-        rows = [[InlineKeyboardButton(text=f"{button.code} ({button.row_index}/{button.sort_order})", callback_data=f"admin:button:{button.id}")] for button in sorted(layout.buttons, key=lambda item: (item.row_index, item.sort_order, item.id))]
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text=f"{button.code} ({button.row_index}/{button.sort_order}, {button.style})",
+                    callback_data=f"admin:button:{button.id}",
+                )
+            ]
+            for button in sorted(layout.buttons, key=lambda item: (item.row_index, item.sort_order, item.id))
+        ]
         rows.append([InlineKeyboardButton(text="Добавить кнопку", callback_data=f"admin:layout:add:{layout.id}")])
         rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:buttons")])
         await callback.answer()
-        await answer_or_edit(callback, f"<b>{layout.title}</b>\nScope: {layout.scope}", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await answer_or_edit(
+            callback,
+            f"<b>{layout.title}</b>\nCode: <code>{layout.code}</code>\nScope: {layout.scope}\n\nИзменения этого лейаута применяются сразу в боте.",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
 
     @router.callback_query(F.data.startswith("admin:layout:add:"))
     async def admin_button_add_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -821,14 +842,17 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         if button is None:
             await callback.answer()
             return
+        layout_code = button.layout.code if button.layout else "-"
         text = (
             f"<b>{button.code}</b>\n\n"
+            f"Лейаут: <code>{layout_code}</code>\n"
             f"Тип: {button.action_type.value}\n"
             f"Назначение: <code>{button.action_value}</code>\n"
             f"Ряд: {button.row_index}\n"
             f"Порядок: {button.sort_order}\n"
             f"Цвет: {button.style}\n"
             f"Активна: {button.is_active}\n\n"
+            f"Примечание: стиль применяется только к layout-кнопкам этого экрана.\n\n"
             f"RU: {pick_translation(button.translations, 'ru', 'text') or '-'}\n"
             f"UZ: {pick_translation(button.translations, 'uz', 'text') or '-'}\n"
             f"EN: {pick_translation(button.translations, 'en', 'text') or '-'}"
@@ -892,7 +916,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             current_index = styles.index(button.style) if button.style in styles else 0
             button.style = styles[(current_index + 1) % len(styles)]
             await session.commit()
-        await callback.answer("Цвет обновлён")
+        await callback.answer(f"Цвет: {button.style}")
         callback.data = f"admin:button:{button_id}"
         await admin_button_detail_handler(callback)
 

@@ -113,7 +113,7 @@ def build_start_router(app: AppContext, bot: Bot) -> Router:
             callback,
             f"<b>{title}</b>\n\n{body}",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="menu:main")]]
+                inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="menu:main", style="danger")]]
             ),
         )
 

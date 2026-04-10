@@ -5,6 +5,7 @@ from collections import defaultdict
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from db.base import ButtonActionType
 from db.models import Layout, LayoutButton
@@ -16,16 +17,28 @@ def button_text(button: LayoutButton, language: str) -> str:
 
 
 async def get_layout(session: AsyncSession, code: str) -> Layout | None:
-    return await session.scalar(select(Layout).where(Layout.code == code, Layout.is_active.is_(True)))
+    return await session.scalar(
+        select(Layout)
+        .options(selectinload(Layout.buttons).selectinload(LayoutButton.translations))
+        .where(Layout.code == code, Layout.is_active.is_(True))
+    )
 
 
 async def list_layouts(session: AsyncSession) -> list[Layout]:
-    result = await session.scalars(select(Layout).order_by(Layout.scope, Layout.title, Layout.id))
+    result = await session.scalars(
+        select(Layout)
+        .options(selectinload(Layout.buttons))
+        .order_by(Layout.scope, Layout.title, Layout.id)
+    )
     return list(result.all())
 
 
 async def get_button(session: AsyncSession, button_id: int) -> LayoutButton | None:
-    return await session.scalar(select(LayoutButton).where(LayoutButton.id == button_id))
+    return await session.scalar(
+        select(LayoutButton)
+        .options(selectinload(LayoutButton.layout), selectinload(LayoutButton.translations))
+        .where(LayoutButton.id == button_id)
+    )
 
 
 async def build_layout_markup(
