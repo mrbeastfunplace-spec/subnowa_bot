@@ -146,30 +146,121 @@ DEFAULT_TEXTS = {
     "user.main_title": {
         "group": "user",
         "description": "Main menu title",
-        "translations": {"ru": "Subnowa", "uz": "Subnowa", "en": "Subnowa"},
+        "translations": {
+            "ru": (
+                "<tg-emoji emoji-id='5312016504939087914'>💮</tg-emoji> Добро пожаловать в\n"
+                "<tg-emoji emoji-id='5332807088940785741'>S</tg-emoji>"
+                "<tg-emoji emoji-id='5330069773139059849'>U</tg-emoji>"
+                "<tg-emoji emoji-id='5330453760395191684'>B</tg-emoji>"
+                "<tg-emoji emoji-id='5359736027080565026'>N</tg-emoji>"
+                "<tg-emoji emoji-id='5361583176550457135'>O</tg-emoji>"
+                "<tg-emoji emoji-id='5395613572531232916'>V</tg-emoji>"
+                "<tg-emoji emoji-id='5226734466315067436'>A</tg-emoji>"
+            ),
+            "uz": (
+                "<tg-emoji emoji-id='5332807088940785741'>S</tg-emoji>"
+                "<tg-emoji emoji-id='5330069773139059849'>U</tg-emoji>"
+                "<tg-emoji emoji-id='5330453760395191684'>B</tg-emoji>"
+                "<tg-emoji emoji-id='5359736027080565026'>N</tg-emoji>"
+                "<tg-emoji emoji-id='5361583176550457135'>O</tg-emoji>"
+                "<tg-emoji emoji-id='5395613572531232916'>V</tg-emoji>"
+                "<tg-emoji emoji-id='5226734466315067436'>A</tg-emoji> ga xush kelibsiz"
+            ),
+            "en": (
+                "Welcome to "
+                "<tg-emoji emoji-id='5332807088940785741'>S</tg-emoji>"
+                "<tg-emoji emoji-id='5330069773139059849'>U</tg-emoji>"
+                "<tg-emoji emoji-id='5330453760395191684'>B</tg-emoji>"
+                "<tg-emoji emoji-id='5359736027080565026'>N</tg-emoji>"
+                "<tg-emoji emoji-id='5361583176550457135'>O</tg-emoji>"
+                "<tg-emoji emoji-id='5395613572531232916'>V</tg-emoji>"
+                "<tg-emoji emoji-id='5226734466315067436'>A</tg-emoji>"
+            ),
+        },
     },
     "user.main_body": {
         "group": "user",
         "description": "Main menu body",
-        "translations": {"ru": "Выберите раздел ниже.", "uz": "Quyidagi bo'limlardan birini tanlang.", "en": "Choose a section below."},
+        "translations": {
+            "ru": (
+                "│ — удобный доступ к цифровым сервисам без лишних сложностей.\n\n"
+                "<tg-emoji emoji-id='5407076281898512830'>🔥</tg-emoji> Здесь можно подключить:\n"
+                "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT PLUS\n"
+                "<tg-emoji emoji-id='5364339557712020484'>🎬</tg-emoji> CapCut PRO\n"
+                "<tg-emoji emoji-id='5330337435500951363'>🚀</tg-emoji> Grok\n"
+                "<tg-emoji emoji-id='5357394595594388140'>🎨</tg-emoji> Adobe и другие сервисы\n\n"
+                "<tg-emoji emoji-id='5438176453621457379'>⚡</tg-emoji> Как всё происходит:\n"
+                "— выбираете сервис\n"
+                "— оформляете заявку\n"
+                "— получаете доступ\n\n"
+                "<tg-emoji emoji-id='5447410659077661506'>💬</tg-emoji> Мы остаёмся на связи и помогаем на каждом этапе.\n\n"
+                "Почему выбирают нас?\n"
+                "✅ Быстрое подключение\n"
+                "✅ Проверенные решения\n"
+                "✅ Поддержка 24/7\n\n"
+                "<tg-emoji emoji-id='5443038326535759644'>🌐</tg-emoji> <a href='{ABOUT_URL}'>Сайт</a>\n"
+                "<tg-emoji emoji-id='5424972470023104089'>💬</tg-emoji> <a href='{REVIEW_URL}'>Отзывы</a>\n\n"
+                "<tg-emoji emoji-id='5469778417045574463'>👇</tg-emoji> Выберите нужный раздел ниже <tg-emoji emoji-id='5469778417045574463'>👇</tg-emoji>"
+            ),
+            "uz": (
+                "Raqamli xizmatlarga oddiy va qulay ulanish.\n\n"
+                "<tg-emoji emoji-id='5407076281898512830'>🔥</tg-emoji> Bu yerda quyidagilar mavjud:\n"
+                "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT PLUS\n"
+                "<tg-emoji emoji-id='5364339557712020484'>🎬</tg-emoji> CapCut PRO\n"
+                "<tg-emoji emoji-id='5330337435500951363'>🚀</tg-emoji> Grok\n"
+                "<tg-emoji emoji-id='5357394595594388140'>🎨</tg-emoji> Adobe va boshqa xizmatlar\n\n"
+                "<tg-emoji emoji-id='5438176453621457379'>⚡</tg-emoji> Qanday ishlaydi:\n"
+                "— xizmatni tanlaysiz\n"
+                "— buyurtma berasiz\n"
+                "— kirish ma'lumotini olasiz\n\n"
+                "<tg-emoji emoji-id='5447410659077661506'>💬</tg-emoji> Har bir bosqichda yordam beramiz.\n\n"
+                "Nega bizni tanlashadi?\n"
+                "✅ Tez ulanish\n"
+                "✅ Ishonchli yechimlar\n"
+                "✅ 24/7 qo'llab-quvvatlash\n\n"
+                "<tg-emoji emoji-id='5443038326535759644'>🌐</tg-emoji> <a href='{ABOUT_URL}'>Sayt</a>\n"
+                "<tg-emoji emoji-id='5424972470023104089'>💬</tg-emoji> <a href='{REVIEW_URL}'>Fikrlar</a>\n\n"
+                "👇 Quyidagi bo'limni tanlang 👇"
+            ),
+            "en": (
+                "Seamless access to digital services without the hassle.\n\n"
+                "<tg-emoji emoji-id='5407076281898512830'>🔥</tg-emoji> Available services:\n"
+                "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT PLUS\n"
+                "<tg-emoji emoji-id='5364339557712020484'>🎬</tg-emoji> CapCut PRO\n"
+                "<tg-emoji emoji-id='5330337435500951363'>🚀</tg-emoji> Grok\n"
+                "<tg-emoji emoji-id='5357394595594388140'>🎨</tg-emoji> Adobe and other services\n\n"
+                "<tg-emoji emoji-id='5438176453621457379'>⚡</tg-emoji> How it works:\n"
+                "— choose a service\n"
+                "— place your order\n"
+                "— get access\n\n"
+                "<tg-emoji emoji-id='5447410659077661506'>💬</tg-emoji> We help you at every step.\n\n"
+                "Why choose us?\n"
+                "✅ Fast connection\n"
+                "✅ Proven solutions\n"
+                "✅ 24/7 support\n\n"
+                "<tg-emoji emoji-id='5443038326535759644'>🌐</tg-emoji> <a href='{ABOUT_URL}'>Website</a>\n"
+                "<tg-emoji emoji-id='5424972470023104089'>💬</tg-emoji> <a href='{REVIEW_URL}'>Reviews</a>\n\n"
+                "👇 Choose a section below 👇"
+            ),
+        },
     },
     "user.catalog_title": {
         "group": "user",
         "description": "Catalog title",
-        "translations": {"ru": "Каталог", "uz": "Katalog", "en": "Catalog"},
+        "translations": {"ru": "Выберите сервис", "uz": "Xizmatni tanlang", "en": "Choose a service"},
     },
     "user.profile_title": {
         "group": "user",
         "description": "Profile title",
-        "translations": {"ru": "Профиль", "uz": "Profil", "en": "Profile"},
+        "translations": {"ru": "Ваш профиль\n\nВыберите раздел 👇", "uz": "Sizning profilingiz\n\nBo‘limni tanlang 👇", "en": "Your profile\n\nChoose a section 👇"},
     },
     "user.no_completed_orders": {
         "group": "user",
         "description": "No completed orders",
         "translations": {
-            "ru": "У вас пока нет завершённых заказов.",
-            "uz": "Sizda hali yakunlangan buyurtmalar yo'q.",
-            "en": "You do not have any completed orders yet.",
+            "ru": "У вас пока нет заказов.",
+            "uz": "Sizda hali buyurtmalar yo‘q.",
+            "en": "You have no orders yet.",
         },
     },
     "user.order_history_title": {
@@ -186,9 +277,72 @@ DEFAULT_TEXTS = {
         "group": "user",
         "description": "FAQ body",
         "translations": {
-            "ru": "Оплатите заказ, отправьте чек и дождитесь обработки. История показывает только завершённые заказы.",
-            "uz": "Buyurtmani to'lang, chekni yuboring va ishlov berilishini kuting. Tarixda faqat yakunlangan buyurtmalar ko'rinadi.",
-            "en": "Pay for the order, send the receipt and wait for processing. History shows completed orders only.",
+            "ru": (
+                "1. Что я получу после оплаты?\n"
+                "Вы получите подтверждение заказа и дальнейшие инструкции по подключению.\n\n"
+                "2. Как подключается ChatGPT Plus?\n"
+                "Мы отправляем приглашение на ваш Gmail, после принятия подписка активируется.\n\n"
+                "3. Как подключается CapCut Pro?\n"
+                "После подтверждения оплаты вы получаете готовые данные для входа.\n\n"
+                "4. Сколько времени занимает подключение?\n"
+                "Обычно от нескольких минут до нескольких часов, в зависимости от очереди.\n\n"
+                "5. Какие способы оплаты доступны?\n"
+                "Click, Humo, Visa и USDT (TRC20).\n\n"
+                "6. Нужен ли VPN для использования?\n"
+                "В большинстве случаев нет.\n\n"
+                "7. Можно ли заказать несколько аккаунтов?\n"
+                "Да, используйте кнопку «Хочу несколько», и администратор обработает заявку.\n\n"
+                "8. Что делать, если письмо не пришло?\n"
+                "Проверьте папки «Спам» и «Промоакции», затем напишите в поддержку.\n\n"
+                "9. Можно ли заказать другой сервис?\n"
+                "Да, в разделе «Другое» можно оставить заявку на нужную подписку.\n\n"
+                "10. Что делать, если возникла проблема после покупки?\n"
+                "Напишите в поддержку, указав номер заказа и суть проблемы."
+            ),
+            "uz": (
+                "1. To‘lovdan keyin nima olaman?\n"
+                "Buyurtma tasdig‘i va ulash bo‘yicha ko‘rsatmalar olasiz.\n\n"
+                "2. ChatGPT Plus qanday ulanadi?\n"
+                "Gmail'ingizga yuborilgan havolani tasdiqlaysiz va obuna faollashadi.\n\n"
+                "3. CapCut Pro qanday beriladi?\n"
+                "To‘lov tasdiqlangach, tayyor login va parol yuboriladi.\n\n"
+                "4. Ulanish qancha vaqt oladi?\n"
+                "Odatda bir necha daqiqadan bir necha soatgacha.\n\n"
+                "5. Qanday to‘lov usullari mavjud?\n"
+                "Click, Humo, Visa va USDT (TRC20).\n\n"
+                "6. VPN kerakmi?\n"
+                "Ko‘p hollarda yo‘q.\n\n"
+                "7. Bir nechta akkaunt buyurtma qilish mumkinmi?\n"
+                "Ha, «Bir nechta kerak» tugmasi orqali so‘rov yuboring.\n\n"
+                "8. Xat kelmasa nima qilaman?\n"
+                "Spam va Promotions papkalarini tekshiring, keyin yordamga yozing.\n\n"
+                "9. Boshqa xizmat buyurtma qilish mumkinmi?\n"
+                "Ha, «Boshqa» bo‘limida so‘rov qoldiring.\n\n"
+                "10. Xariddan keyin muammo bo‘lsa nima qilaman?\n"
+                "Buyurtma raqami bilan yordam xizmatiga yozing."
+            ),
+            "en": (
+                "1. What do I receive after payment?\n"
+                "You receive order confirmation and connection instructions.\n\n"
+                "2. How is ChatGPT Plus activated?\n"
+                "We send an invitation to your Gmail and the subscription activates after you accept it.\n\n"
+                "3. How is CapCut Pro delivered?\n"
+                "After payment confirmation you receive ready-to-use login details.\n\n"
+                "4. How long does activation take?\n"
+                "Usually from a few minutes to a few hours.\n\n"
+                "5. Which payment methods are available?\n"
+                "Click, Humo, Visa, and USDT (TRC20).\n\n"
+                "6. Do I need a VPN?\n"
+                "Usually no.\n\n"
+                "7. Can I order several accounts?\n"
+                "Yes, use the several-accounts button and the admin will process it.\n\n"
+                "8. What if the email does not arrive?\n"
+                "Check Spam and Promotions, then contact support.\n\n"
+                "9. Can I request another service?\n"
+                "Yes, use the Other section and send your request.\n\n"
+                "10. What should I do if there is a problem after purchase?\n"
+                "Contact support and include your order number."
+            ),
         },
     },
     "user.choose_payment_method": {
@@ -218,9 +372,9 @@ DEFAULT_TEXTS = {
         "group": "user",
         "description": "Payment rejected message",
         "translations": {
-            "ru": "Оплата отклонена. Если это ошибка, свяжитесь с поддержкой.",
-            "uz": "To'lov rad etildi. Agar bu xato bo'lsa, qo'llab-quvvatlashga yozing.",
-            "en": "Payment was rejected. Contact support if this is a mistake.",
+            "ru": "Ваша оплата отклонена.\n\nПроверьте чек или свяжитесь с техподдержкой.",
+            "uz": "To‘lovingiz rad etildi.\n\nChekni tekshiring yoki yordam xizmatiga murojaat qiling.",
+            "en": "Your payment was rejected.\n\nPlease check your receipt or contact support.",
         },
     },
     "user.payment_approved": {
@@ -241,21 +395,25 @@ DEFAULT_TEXTS = {
     "user.order_cancelled": {
         "group": "user",
         "description": "Order cancelled",
-        "translations": {"ru": "Заказ отменён.", "uz": "Buyurtma bekor qilindi.", "en": "Order cancelled."},
+        "translations": {
+            "ru": "Заказ {order_number}\nСтатус: отменён\nСообщение: заказ отменён",
+            "uz": "Buyurtma {order_number}\nHolat: bekor qilindi\nXabar: buyurtma bekor qilindi",
+            "en": "Order {order_number}\nStatus: cancelled\nMessage: order cancelled",
+        },
     },
     "user.stock_empty": {
         "group": "user",
         "description": "Stock empty message",
         "translations": {
-            "ru": "Склад временно пуст. Свяжитесь с поддержкой или попробуйте позже.",
-            "uz": "Ombor vaqtincha bo'sh. Qo'llab-quvvatlashga yozing yoki keyinroq urinib ko'ring.",
-            "en": "Stock is currently empty. Contact support or try again later.",
+            "ru": "В данный момент товар закончился.\n\nПожалуйста, попробуйте позже или свяжитесь с поддержкой.",
+            "uz": "Hozirda mahsulot tugagan.\n\nIltimos, keyinroq urinib ko‘ring yoki yordamga yozing.",
+            "en": "This item is currently out of stock.\n\nPlease try again later or contact support.",
         },
     },
     "user.trial_gmail_prompt": {
         "group": "user",
         "description": "Trial Gmail prompt",
-        "translations": {"ru": "Введите Gmail для пробной подписки ChatGPT.", "uz": "ChatGPT sinov obunasi uchun Gmail kiriting.", "en": "Enter the Gmail address for the ChatGPT trial."},
+        "translations": {"ru": "Введите Gmail для подключения ChatGPT.", "uz": "ChatGPT uchun Gmail kiriting.", "en": "Enter your Gmail for ChatGPT activation."},
     },
     "user.trial_subscribe": {
         "group": "user",
@@ -270,66 +428,107 @@ DEFAULT_TEXTS = {
     "user.trial_already_used": {
         "group": "user",
         "description": "Trial already used",
-        "translations": {"ru": "Вы уже использовали пробную подписку.", "uz": "Siz sinov obunasidan avval foydalangansiz.", "en": "You have already used the trial subscription."},
+        "translations": {"ru": "Вы уже использовали пробную подписку.", "uz": "Siz sinov obunasidan allaqachon foydalangansiz.", "en": "You have already used the trial subscription."},
     },
     "user.trial_created": {
         "group": "user",
         "description": "Trial created",
-        "translations": {"ru": "Пробная заявка создана и передана администратору.", "uz": "Sinov arizasi yaratildi va administratorga yuborildi.", "en": "Trial request created and sent to the admin."},
+        "translations": {
+            "ru": "Заказ: {order_number}\nТовар: ChatGPT PLUS (3 дня)\nСтоимость: БЕСПЛАТНО\nСтатус: заказ в обработке",
+            "uz": "Buyurtma: {order_number}\nMahsulot: ChatGPT PLUS (3 kun)\nNarx: BEPUL\nHolat: buyurtma ko‘rib chiqilmoqda",
+            "en": "Order: {order_number}\nProduct: ChatGPT PLUS (3 days)\nPrice: FREE\nStatus: order is under review",
+        },
     },
     "user.trial_approved": {
         "group": "user",
         "description": "Trial approved",
-        "translations": {"ru": "Пробная подписка одобрена.", "uz": "Sinov obunasi tasdiqlandi.", "en": "Trial subscription approved."},
+        "translations": {
+            "ru": (
+                "✅ Ваш заказ подтверждён.\n\n"
+                "Заказ: {order_number}\n"
+                "Товар: ChatGPT PLUS (3 дня)\n"
+                "Стоимость: БЕСПЛАТНО\n"
+                "Срок доступа: 3 дня\n\n"
+                "<blockquote>Что будет дальше:\n"
+                "1. Мы отправим приглашение на указанный Gmail.\n"
+                "2. Вам нужно открыть письмо и подтвердить подключение.\n"
+                "3. После подтверждения Plus активируется автоматически.</blockquote>\n\n"
+                "Проверьте папки «Входящие» и «Спам». Если письмо не пришло, напишите в поддержку."
+            ),
+            "uz": (
+                "✅ Buyurtmangiz tasdiqlandi.\n\n"
+                "Buyurtma: {order_number}\n"
+                "Mahsulot: ChatGPT PLUS (3 kun)\n"
+                "Narx: BEPUL\n"
+                "Muddat: 3 kun\n\n"
+                "Havola emailingizga yuboriladi. Xatni ochib tasdiqlaganingizdan keyin 3 kunlik Plus faollashadi."
+            ),
+            "en": (
+                "✅ Your order has been approved.\n\n"
+                "Order: {order_number}\n"
+                "Product: ChatGPT PLUS (3 days)\n"
+                "Price: FREE\n"
+                "Access period: 3 days\n\n"
+                "We will send an invitation to your Gmail. Open the email and accept it to activate Plus."
+            ),
+        },
     },
     "user.trial_rejected": {
         "group": "user",
         "description": "Trial rejected",
-        "translations": {"ru": "Пробная подписка отклонена.", "uz": "Sinov obunasi rad etildi.", "en": "Trial subscription rejected."},
+        "translations": {
+            "ru": "Пробные подписки закончились. Пожалуйста, выберите другой тип подписки.",
+            "uz": "Sinov obunalari tugagan. Iltimos, boshqa turdagi obunani tanlang.",
+            "en": "Trial subscriptions are out of stock. Please choose another subscription.",
+        },
     },
     "user.chatgpt_gmail_prompt": {
         "group": "user",
         "description": "ChatGPT Gmail prompt",
-        "translations": {"ru": "Введите Gmail для оформления ChatGPT Plus/Pro.", "uz": "ChatGPT Plus/Pro uchun Gmail kiriting.", "en": "Enter the Gmail address for ChatGPT Plus/Pro."},
+        "translations": {"ru": "Введите Gmail, на который нужно подключить ChatGPT Plus.", "uz": "ChatGPT Plus ulash uchun Gmail kiriting.", "en": "Enter your Gmail for ChatGPT Plus activation."},
     },
     "user.chatgpt_saved_gmail_choice": {
         "group": "user",
         "description": "Saved Gmail prompt",
         "translations": {
-            "ru": "Найден Gmail <b>{gmail}</b>. Использовать его или указать другой?",
-            "uz": "<b>{gmail}</b> Gmail topildi. Shu manzilni ishlatasizmi yoki boshqasini kiritasizmi?",
-            "en": "Found Gmail <b>{gmail}</b>. Use it or enter another one?",
+            "ru": "Мы нашли Gmail, который вы уже использовали для ChatGPT:\n\n<b>{gmail}</b>\n\nОформить подписку на этот Gmail или указать другой?",
+            "uz": "Siz ilgari ChatGPT uchun ishlatgan Gmail topildi:\n\n<b>{gmail}</b>\n\nObunani shu Gmailga rasmiylashtiraylikmi yoki boshqasini kiritasizmi?",
+            "en": "We found a Gmail you already used for ChatGPT:\n\n<b>{gmail}</b>\n\nDo you want to use this Gmail or enter another one?",
         },
     },
     "user.custom_request_prompt": {
         "group": "user",
         "description": "Custom request prompt",
-        "translations": {"ru": "Опишите, какую подписку или товар вы хотите получить.", "uz": "Qanday obuna yoki mahsulot kerakligini yozing.", "en": "Describe the subscription or product you want."},
+        "translations": {"ru": "Какую подписку вы хотели бы ещё получить дешевле?", "uz": "Qaysi obunani arzonroq olishni xohlaysiz?", "en": "Which subscription would you like to get cheaper?"},
     },
     "user.custom_request_created": {
         "group": "user",
         "description": "Custom request created",
-        "translations": {"ru": "Заявка создана. Администратор рассмотрит её позже.", "uz": "Ariza yaratildi. Administrator keyinroq ko'rib chiqadi.", "en": "Request created. An admin will review it later."},
+        "translations": {
+            "ru": "✅ Ваша заявка принята.\n\nАдминистратор увидит ваш запрос и свяжется с вами при необходимости.",
+            "uz": "✅ So‘rovingiz qabul qilindi.\n\nAdministrator uni ko‘rib chiqadi va kerak bo‘lsa bog‘lanadi.",
+            "en": "✅ Your request has been accepted.\n\nThe admin will review it and contact you if needed.",
+        },
     },
     "button.back": {
         "group": "button",
         "description": "Back button",
-        "translations": {"ru": "Назад", "uz": "Ortga", "en": "Back"},
+        "translations": {"ru": "◀ Назад", "uz": "◀ Orqaga", "en": "◀ Back"},
     },
     "button.menu": {
         "group": "button",
         "description": "Main menu button",
-        "translations": {"ru": "Меню", "uz": "Menyu", "en": "Menu"},
+        "translations": {"ru": "🏠 Меню", "uz": "🏠 Menyu", "en": "🏠 Menu"},
     },
     "button.buy": {
         "group": "button",
         "description": "Buy button",
-        "translations": {"ru": "Купить", "uz": "Sotib olish", "en": "Buy"},
+        "translations": {"ru": "Оформить", "uz": "Rasmiylashtirish", "en": "Proceed"},
     },
     "button.history": {
         "group": "button",
         "description": "History button",
-        "translations": {"ru": "История", "uz": "Tarix", "en": "History"},
+        "translations": {"ru": "📜 История заказов", "uz": "📜 Buyurtmalar tarixi", "en": "📜 Order history"},
     },
     "button.send_check": {
         "group": "button",
@@ -344,12 +543,12 @@ DEFAULT_TEXTS = {
     "button.use_saved_gmail": {
         "group": "button",
         "description": "Use saved gmail button",
-        "translations": {"ru": "Использовать этот Gmail", "uz": "Shu Gmailni ishlatish", "en": "Use this Gmail"},
+        "translations": {"ru": "На этот", "uz": "Shu Gmail", "en": "Use this"},
     },
     "button.use_other_gmail": {
         "group": "button",
         "description": "Use other gmail button",
-        "translations": {"ru": "Указать другой Gmail", "uz": "Boshqa Gmail kiritish", "en": "Use another Gmail"},
+        "translations": {"ru": "Другой", "uz": "Boshqa", "en": "Other"},
     },
     "admin.panel_title": {
         "group": "admin",
@@ -400,12 +599,12 @@ DEFAULT_LAYOUTS = [
         "title": "Main menu",
         "scope": "user",
         "buttons": [
-            {"code": "catalog", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:catalog", "style": "default", "row_index": 0, "sort_order": 10, "translations": {"ru": "Подписки", "uz": "Obunalar", "en": "Subscriptions"}},
-            {"code": "profile", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:profile", "style": "default", "row_index": 1, "sort_order": 10, "translations": {"ru": "Профиль", "uz": "Profil", "en": "Profile"}},
-            {"code": "languages", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:languages", "style": "default", "row_index": 1, "sort_order": 20, "translations": {"ru": "Языки", "uz": "Tillar", "en": "Languages"}},
-            {"code": "support", "action_type": ButtonActionType.URL.value, "action_value": "__SUPPORT_URL__", "style": "default", "row_index": 2, "sort_order": 10, "translations": {"ru": "Поддержка", "uz": "Qo'llab-quvvatlash", "en": "Support"}},
-            {"code": "about", "action_type": ButtonActionType.URL.value, "action_value": "__ABOUT_URL__", "style": "default", "row_index": 3, "sort_order": 10, "translations": {"ru": "О нас", "uz": "Biz haqimizda", "en": "About"}},
-            {"code": "faq", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:faq", "style": "default", "row_index": 3, "sort_order": 20, "translations": {"ru": "FAQ", "uz": "FAQ", "en": "FAQ"}},
+            {"code": "catalog", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:catalog", "style": "default", "row_index": 0, "sort_order": 10, "translations": {"ru": "💎 Подписки / тарифы", "uz": "💎 Obunalar / tariflar", "en": "💎 Subscriptions / Tariffs"}},
+            {"code": "profile", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:profile", "style": "default", "row_index": 1, "sort_order": 10, "translations": {"ru": "👤 Профиль", "uz": "👤 Profil", "en": "👤 Profile"}},
+            {"code": "languages", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:languages", "style": "default", "row_index": 1, "sort_order": 20, "translations": {"ru": "🌐 Языки", "uz": "🌐 Tillar", "en": "🌐 Languages"}},
+            {"code": "support", "action_type": ButtonActionType.URL.value, "action_value": "__SUPPORT_URL__", "style": "default", "row_index": 2, "sort_order": 10, "translations": {"ru": "💬 Задать вопрос", "uz": "💬 Savol berish", "en": "💬 Support"}},
+            {"code": "about", "action_type": ButtonActionType.URL.value, "action_value": "__ABOUT_URL__", "style": "default", "row_index": 3, "sort_order": 10, "translations": {"ru": "ℹ️ О нас", "uz": "ℹ️ Biz haqimizda", "en": "ℹ️ About us"}},
+            {"code": "faq", "action_type": ButtonActionType.CALLBACK.value, "action_value": "menu:faq", "style": "default", "row_index": 3, "sort_order": 20, "translations": {"ru": "❓ FAQ", "uz": "❓ FAQ", "en": "❓ FAQ"}},
         ],
     },
     {

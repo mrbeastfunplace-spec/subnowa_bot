@@ -49,3 +49,29 @@ def format_money(value: Decimal | str | int | float, currency: str) -> str:
 
 def order_status_label(status: str, language: str) -> str:
     return STATUS_LABELS.get(language, STATUS_LABELS["ru"]).get(status, status)
+
+
+def order_display_number(order_or_id: object | int | None) -> str:
+    if isinstance(order_or_id, int):
+        return f"#{order_or_id}"
+    order_id = getattr(order_or_id, "id", None)
+    if isinstance(order_id, int):
+        return f"#{order_id}"
+    return "-"
+
+
+def user_display_name(user: object | None, fallback_id: int | None = None) -> str:
+    username = (getattr(user, "username", None) or "").strip()
+    if username:
+        return f"@{username.lstrip('@')}"
+
+    full_name = (getattr(user, "full_name", None) or "").strip()
+    if full_name:
+        return full_name
+
+    telegram_id = getattr(user, "telegram_id", None)
+    if isinstance(telegram_id, int):
+        return str(telegram_id)
+    if isinstance(fallback_id, int):
+        return str(fallback_id)
+    return "-"

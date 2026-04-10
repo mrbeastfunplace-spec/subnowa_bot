@@ -44,10 +44,13 @@ async def build_layout_markup(
         )
         for button in buttons:
             text = button_text(button, language)
+            button_kwargs = {}
+            if button.style and button.style != "default":
+                button_kwargs["style"] = button.style
             if button.action_type == ButtonActionType.URL:
-                grouped[button.row_index].append(InlineKeyboardButton(text=text, url=button.action_value))
+                grouped[button.row_index].append(InlineKeyboardButton(text=text, url=button.action_value, **button_kwargs))
             else:
-                grouped[button.row_index].append(InlineKeyboardButton(text=text, callback_data=button.action_value))
+                grouped[button.row_index].append(InlineKeyboardButton(text=text, callback_data=button.action_value, **button_kwargs))
         rows.extend(grouped[index] for index in sorted(grouped))
     if extra_rows:
         rows.extend(extra_rows)

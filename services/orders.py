@@ -140,6 +140,18 @@ async def get_order_by_number(session: AsyncSession, order_number: str) -> Order
     return await session.scalar(select(Order).where(Order.order_number == order_number))
 
 
+async def get_order_by_reference(session: AsyncSession, reference: str) -> Order | None:
+    cleaned = (reference or "").strip()
+    if not cleaned:
+        return None
+
+    normalized = cleaned[1:].strip() if cleaned.startswith("#") else cleaned
+    if normalized.isdigit():
+        return await get_order_by_id(session, int(normalized))
+
+    return await get_order_by_number(session, cleaned)
+
+
 async def list_orders(
     session: AsyncSession,
     statuses: list[str] | None = None,

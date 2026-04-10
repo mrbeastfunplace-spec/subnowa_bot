@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -13,12 +15,12 @@ from services.buttons import build_layout_markup, get_button, get_layout, list_l
 from services.capcut import add_bulk_accounts, add_capcut_account, claim_free_account, count_free_accounts, list_accounts
 from services.catalog import category_name, get_category, get_product, product_name
 from services.context import AppContext
-from services.orders import change_status, get_order_by_id, list_orders
+from services.orders import change_status, get_order_by_id, get_order_by_reference, list_orders
 from services.payments import get_payment_method, payment_title, toggle_product_payment_method
 from services.texts import format_text
 from services.users import get_user_language
 from states import AdminState
-from utils.formatting import format_money, order_status_label
+from utils.formatting import format_money, order_display_number, order_status_label, user_display_name
 from utils.messages import answer_or_edit
 from utils.translations import pick_translation
 
@@ -39,6 +41,24 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             markup = await build_layout_markup(session, "admin_main", "ru")
             title = await format_text(session, "admin.panel_title", "ru", fallback="Админ-панель")
         await answer_or_edit(target, f"<b>{title}</b>", reply_markup=markup)
+
+    def _render_order_text(order: Order) -> str:
+        details = order.details or {}
+        display_name = escape(user_display_name(order.user))
+        telegram_id = order.user.telegram_id if order.user else "-"
+        return (
+            f"<b>{escape(order.product_name_snapshot or 'Заказ')}</b>\n\n"
+            f"Номер: <code>{order_display_number(order)}</code>\n"
+            f"Код: <code>{order.order_number}</code>\n"
+            f"Пользователь: <b>{display_name}</b>\n"
+            f"Telegram ID: <code>{telegram_id}</code>\n"
+            f"Статус: <b>{order_status_label(order.status.value, 'ru')}</b>\n"
+            f"Сумма: <b>{format_money(order.amount, order.currency)}</b>\n"
+            f"Метод оплаты: {escape(order.payment_method.admin_title) if order.payment_method else '-'}\n"
+            f"Тип выдачи: {escape(order.delivery_type)}\n"
+            f"Gmail: {escape(str(details.get('gmail', '-')))}\n"
+            f"Комментарий: {escape(order.customer_note or '-')}"
+        )
 
     def _order_actions_markup(order: Order) -> InlineKeyboardMarkup:
         rows: list[list[InlineKeyboardButton]] = []
@@ -104,6 +124,21 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         await state.clear()
         await _render_admin_main(message)
 
+    @router.message(Command("find_order"))
+    async def admin_find_order_handler(message: Message) -> None:
+        if not _guard(message.from_user.id):
+            return
+        reference = (message.text or "").partition(" ")[2].strip()
+        if not reference:
+            await message.answer("Используйте: <code>/find_order 123</code> или <code>/find_order #123</code>.")
+            return
+        async with app.session_factory() as session:
+            order = await get_order_by_reference(session, reference)
+        if order is None:
+            await message.answer("Заказ не найден.")
+            return
+        await message.answer(_render_order_text(order), reply_markup=_order_actions_markup(order))
+
     @router.callback_query(F.data == "admin:main")
     async def admin_main_handler(callback: CallbackQuery, state: FSMContext) -> None:
         if not _guard(callback.from_user.id):
@@ -134,11 +169,11 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         if callback.data.count(":") == 2:
             status = callback.data.split(":")[-1]
             statuses = [status]
-            title = f"Заказы: {status}"
+            title = f"Заказы: {order_status_label(status, 'ru')}"
         async with app.session_factory() as session:
             orders = await list_orders(session, statuses=statuses, limit=20)
         rows = [
-            [InlineKeyboardButton(text=f"{order.order_number} • {order.product_name_snapshot} • {order.status.value}", callback_data=f"admin:order:{order.id}")]
+            [InlineKeyboardButton(text=f"{order_display_number(order)} • {order.product_name_snapshot} • {order_status_label(order.status.value, 'ru')}", callback_data=f"admin:order:{order.id}")]
             for order in orders
         ]
         rows.append([
@@ -151,7 +186,11 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         ])
         rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:main")])
         await callback.answer()
-        await answer_or_edit(callback, f"<b>{title}</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+        await answer_or_edit(
+            callback,
+            f"<b>{title}</b>\n\nПоиск: <code>/find_order 123</code> или <code>/find_order #123</code>",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
+        )
 
     @router.callback_query(F.data.startswith("admin:order:"))
     async def admin_order_detail_handler(callback: CallbackQuery) -> None:
@@ -165,19 +204,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         if order is None:
             await answer_or_edit(callback, "Заказ не найден.", reply_markup=_back_main_markup())
             return
-        details = order.details or {}
-        text = (
-            f"<b>{order.product_name_snapshot or 'Заказ'}</b>\n\n"
-            f"Номер: <code>{order.order_number}</code>\n"
-            f"Пользователь: <code>{order.user.telegram_id if order.user else '-'}</code>\n"
-            f"Статус: <b>{order.status.value}</b>\n"
-            f"Сумма: <b>{format_money(order.amount, order.currency)}</b>\n"
-            f"Метод оплаты: {order.payment_method.admin_title if order.payment_method else '-'}\n"
-            f"Тип выдачи: {order.delivery_type}\n"
-            f"Gmail: {details.get('gmail', '-')}\n"
-            f"Комментарий: {order.customer_note or '-'}"
-        )
-        await answer_or_edit(callback, text, reply_markup=_order_actions_markup(order))
+        await answer_or_edit(callback, _render_order_text(order), reply_markup=_order_actions_markup(order))
 
     @router.callback_query(F.data.startswith("admin:approve:"))
     async def admin_approve_order_handler(callback: CallbackQuery) -> None:
@@ -513,7 +540,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         if not _guard(callback.from_user.id):
             await callback.answer()
             return
-        _, _, _, _, product_id, payment_id = callback.data.split(":")
+        _, _, _, product_id, payment_id = callback.data.split(":")
         async with app.session_factory() as session:
             await toggle_product_payment_method(session, int(product_id), int(payment_id))
             await session.commit()
@@ -726,12 +753,12 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="Action", callback_data=f"admin:button:action:{button.id}"),
-                    InlineKeyboardButton(text="Row", callback_data=f"admin:button:row:{button.id}"),
+                    InlineKeyboardButton(text="Назначение", callback_data=f"admin:button:action:{button.id}"),
+                    InlineKeyboardButton(text="Ряд", callback_data=f"admin:button:row:{button.id}"),
                 ],
                 [
-                    InlineKeyboardButton(text="Sort", callback_data=f"admin:button:sort:{button.id}"),
-                    InlineKeyboardButton(text="Style", callback_data=f"admin:button:style:{button.id}"),
+                    InlineKeyboardButton(text="Порядок", callback_data=f"admin:button:sort:{button.id}"),
+                    InlineKeyboardButton(text="Цвет", callback_data=f"admin:button:style:{button.id}"),
                 ],
                 [
                     InlineKeyboardButton(text="RU", callback_data=f"admin:button:lang:{button.id}:ru"),
@@ -796,12 +823,12 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             return
         text = (
             f"<b>{button.code}</b>\n\n"
-            f"Type: {button.action_type.value}\n"
-            f"Action: <code>{button.action_value}</code>\n"
-            f"Row: {button.row_index}\n"
-            f"Sort: {button.sort_order}\n"
-            f"Style: {button.style}\n"
-            f"Active: {button.is_active}\n\n"
+            f"Тип: {button.action_type.value}\n"
+            f"Назначение: <code>{button.action_value}</code>\n"
+            f"Ряд: {button.row_index}\n"
+            f"Порядок: {button.sort_order}\n"
+            f"Цвет: {button.style}\n"
+            f"Активна: {button.is_active}\n\n"
             f"RU: {pick_translation(button.translations, 'ru', 'text') or '-'}\n"
             f"UZ: {pick_translation(button.translations, 'uz', 'text') or '-'}\n"
             f"EN: {pick_translation(button.translations, 'en', 'text') or '-'}"
@@ -856,7 +883,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             await callback.answer()
             return
         button_id = int(callback.data.split(":")[-1])
-        styles = ["default", "success", "danger"]
+        styles = ["default", "primary", "success", "danger"]
         async with app.session_factory() as session:
             button = await get_button(session, button_id)
             if button is None:
@@ -865,7 +892,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             current_index = styles.index(button.style) if button.style in styles else 0
             button.style = styles[(current_index + 1) % len(styles)]
             await session.commit()
-        await callback.answer("Style обновлён")
+        await callback.answer("Цвет обновлён")
         callback.data = f"admin:button:{button_id}"
         await admin_button_detail_handler(callback)
 
@@ -1170,7 +1197,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             button.action_value = raw[1]
             await session.commit()
         await state.clear()
-        await message.answer("Action обновлён.")
+        await message.answer("Назначение кнопки обновлено.")
 
     @router.message(AdminState.waiting_button_row)
     async def admin_button_row_message_handler(message: Message, state: FSMContext) -> None:

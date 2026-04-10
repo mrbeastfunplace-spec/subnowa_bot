@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import escape
 import re
 
 from aiogram import Bot, F, Router
@@ -23,6 +24,7 @@ from services.settings import get_setting
 from services.texts import format_text
 from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
 from states import UserFlowState
+from utils.formatting import order_display_number, user_display_name
 from utils.messages import answer_or_edit
 
 
@@ -30,11 +32,11 @@ GMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@gmail\.com$", re.IGNORECASE)
 
 
 def _back_text(language: str) -> str:
-    return "Назад" if language == "ru" else ("Ortga" if language == "uz" else "Back")
+    return "◀ Назад" if language == "ru" else ("◀ Orqaga" if language == "uz" else "◀ Back")
 
 
 def _menu_text(language: str) -> str:
-    return "Меню" if language == "ru" else ("Menyu" if language == "uz" else "Menu")
+    return "🏠 Меню" if language == "ru" else ("🏠 Menyu" if language == "uz" else "🏠 Menu")
 
 
 def _subscription_markup(channel_url: str, callback_data: str, language: str) -> InlineKeyboardMarkup:
@@ -190,8 +192,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             bot,
             app,
             "Новая trial-заявка\n\n"
-            f"Заказ: <code>{order.order_number}</code>\n"
-            f"Пользователь: <code>{callback.from_user.id}</code>\n"
+            f"Заказ: <code>{order_display_number(order)}</code>\n"
+            f"Пользователь: <b>{escape(user_display_name(callback.from_user, callback.from_user.id))}</b>\n"
             f"Gmail: {data.get('gmail', '-')}",
             order.id,
         )
@@ -227,18 +229,19 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language)
             methods = await list_product_payment_methods(session, product)
+            payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
             await session.commit()
         await state.clear()
         await callback.answer()
         await answer_or_edit(
             callback,
-            f"<b>{order.product_name_snapshot}</b>\n\nВыберите способ оплаты.",
+            f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
             reply_markup=payment_methods_markup(order.id, methods, language),
         )
         await _notify_admins(
             bot,
             app,
-            f"Новый заказ\n\nЗаказ: <code>{order.order_number}</code>\nПользователь: <code>{callback.from_user.id}</code>\nТовар: {order.product_name_snapshot}",
+            f"Новый заказ\n\nЗаказ: <code>{order_display_number(order)}</code>\nПользователь: <b>{escape(user_display_name(callback.from_user, callback.from_user.id))}</b>\nТовар: {order.product_name_snapshot}",
             order.id,
         )
 
@@ -271,7 +274,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await _notify_admins(
             bot,
             app,
-            f"Новая кастомная заявка\n\nЗаказ: <code>{order.order_number}</code>\nПользователь: <code>{message.from_user.id}</code>\nЗапрос: {note}",
+            f"Новая кастомная заявка\n\nЗаказ: <code>{order_display_number(order)}</code>\nПользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\nЗапрос: {escape(note)}",
             order.id,
         )
 
@@ -333,14 +336,15 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language, details={"gmail": gmail})
             methods = await list_product_payment_methods(session, product)
+            payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
             await session.commit()
         await state.clear()
         await callback.answer()
-        await answer_or_edit(callback, f"<b>{order.product_name_snapshot}</b>\n\nВыберите способ оплаты.", reply_markup=payment_methods_markup(order.id, methods, language))
+        await answer_or_edit(callback, f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}", reply_markup=payment_methods_markup(order.id, methods, language))
         await _notify_admins(
             bot,
             app,
-            f"Новый заказ ChatGPT\n\nЗаказ: <code>{order.order_number}</code>\nПользователь: <code>{callback.from_user.id}</code>\nGmail: {gmail}",
+            f"Новый заказ ChatGPT\n\nЗаказ: <code>{order_display_number(order)}</code>\nПользователь: <b>{escape(user_display_name(callback.from_user, callback.from_user.id))}</b>\nGmail: {escape(gmail)}",
             order.id,
         )
 
@@ -375,13 +379,15 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     @router.callback_query(F.data.startswith("order:cancel:"))
     async def order_cancel_handler(callback: CallbackQuery, state: FSMContext) -> None:
         order_id = int(callback.data.split(":")[-1])
+        order_reference = order_display_number(order_id)
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             order = await get_order_by_id(session, order_id)
             if order is not None and order.user and order.user.telegram_id == callback.from_user.id and order.status != OrderStatus.COMPLETED:
+                order_reference = order_display_number(order)
                 await change_status(session, order, OrderStatus.CANCELLED, changed_by_telegram_id=callback.from_user.id)
                 await session.commit()
-            text = await format_text(session, "user.order_cancelled", language, fallback="Заказ отменён.")
+            text = await format_text(session, "user.order_cancelled", language, fallback="Заказ отменён.", order_number=order_reference)
         await state.clear()
         await callback.answer()
         await answer_or_edit(callback, text, reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=_menu_text(language), callback_data="menu:main")]]))
@@ -412,8 +418,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                     photo=file_id,
                     caption=(
                         "Новый чек\n\n"
-                        f"Заказ: <code>{order.order_number}</code>\n"
-                        f"Пользователь: <code>{message.from_user.id}</code>\n"
+                        f"Заказ: <code>{order_display_number(order)}</code>\n"
+                        f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
                         f"Товар: {order.product_name_snapshot}"
                     ),
                     reply_markup=InlineKeyboardMarkup(
@@ -449,8 +455,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                     document=file_id,
                     caption=(
                         "Новый чек\n\n"
-                        f"Заказ: <code>{order.order_number}</code>\n"
-                        f"Пользователь: <code>{message.from_user.id}</code>\n"
+                        f"Заказ: <code>{order_display_number(order)}</code>\n"
+                        f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
                         f"Товар: {order.product_name_snapshot}"
                     ),
                     reply_markup=InlineKeyboardMarkup(

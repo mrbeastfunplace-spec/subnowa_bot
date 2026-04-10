@@ -29,6 +29,92 @@ from db.models import (
 
 
 _CATEGORY_SLUG_MAX_LENGTH = 64
+_REPLACEABLE_TEXT_DEFAULTS: dict[str, dict[str, str]] = {
+    "user.main_title": {"ru": "Subnowa", "uz": "Subnowa", "en": "Subnowa"},
+    "user.main_body": {"ru": "Выберите раздел ниже.", "uz": "Quyidagi bo'limlardan birini tanlang.", "en": "Choose a section below."},
+    "user.catalog_title": {"ru": "Каталог", "uz": "Katalog", "en": "Catalog"},
+    "user.profile_title": {"ru": "Профиль", "uz": "Profil", "en": "Profile"},
+    "user.no_completed_orders": {
+        "ru": "У вас пока нет завершённых заказов.",
+        "uz": "Sizda hali yakunlangan buyurtmalar yo'q.",
+        "en": "You do not have any completed orders yet.",
+    },
+    "user.faq_body": {
+        "ru": "Оплатите заказ, отправьте чек и дождитесь обработки. История показывает только завершённые заказы.",
+        "uz": "Buyurtmani to'lang, chekni yuboring va ishlov berilishini kuting. Tarixda faqat yakunlangan buyurtmalar ko'rinadi.",
+        "en": "Pay for the order, send the receipt and wait for processing. History shows completed orders only.",
+    },
+    "user.payment_rejected": {
+        "ru": "Оплата отклонена. Если это ошибка, свяжитесь с поддержкой.",
+        "uz": "To'lov rad etildi. Agar bu xato bo'lsa, qo'llab-quvvatlashga yozing.",
+        "en": "Payment was rejected. Contact support if this is a mistake.",
+    },
+    "user.order_cancelled": {"ru": "Заказ отменён.", "uz": "Buyurtma bekor qilindi.", "en": "Order cancelled."},
+    "user.stock_empty": {
+        "ru": "Склад временно пуст. Свяжитесь с поддержкой или попробуйте позже.",
+        "uz": "Ombor vaqtincha bo'sh. Qo'llab-quvvatlashga yozing yoki keyinroq urinib ko'ring.",
+        "en": "Stock is currently empty. Contact support or try again later.",
+    },
+    "user.trial_gmail_prompt": {
+        "ru": "Введите Gmail для пробной подписки ChatGPT.",
+        "uz": "ChatGPT sinov obunasi uchun Gmail kiriting.",
+        "en": "Enter the Gmail address for the ChatGPT trial.",
+    },
+    "user.trial_already_used": {
+        "ru": "Вы уже использовали пробную подписку.",
+        "uz": "Siz sinov obunasidan avval foydalangansiz.",
+        "en": "You have already used the trial subscription.",
+    },
+    "user.trial_created": {
+        "ru": "Пробная заявка создана и передана администратору.",
+        "uz": "Sinov arizasi yaratildi va administratorga yuborildi.",
+        "en": "Trial request created and sent to the admin.",
+    },
+    "user.trial_approved": {
+        "ru": "Пробная подписка одобрена.",
+        "uz": "Sinov obunasi tasdiqlandi.",
+        "en": "Trial subscription approved.",
+    },
+    "user.trial_rejected": {
+        "ru": "Пробная подписка отклонена.",
+        "uz": "Sinov obunasi rad etildi.",
+        "en": "Trial subscription rejected.",
+    },
+    "user.chatgpt_gmail_prompt": {
+        "ru": "Введите Gmail для оформления ChatGPT Plus/Pro.",
+        "uz": "ChatGPT Plus/Pro uchun Gmail kiriting.",
+        "en": "Enter the Gmail address for ChatGPT Plus/Pro.",
+    },
+    "user.chatgpt_saved_gmail_choice": {
+        "ru": "Найден Gmail <b>{gmail}</b>. Использовать его или указать другой?",
+        "uz": "<b>{gmail}</b> Gmail topildi. Shu manzilni ishlatasizmi yoki boshqasini kiritasizmi?",
+        "en": "Found Gmail <b>{gmail}</b>. Use it or enter another one?",
+    },
+    "user.custom_request_prompt": {
+        "ru": "Опишите, какую подписку или товар вы хотите получить.",
+        "uz": "Qanday obuna yoki mahsulot kerakligini yozing.",
+        "en": "Describe the subscription or product you want.",
+    },
+    "user.custom_request_created": {
+        "ru": "Заявка создана. Администратор рассмотрит её позже.",
+        "uz": "Ariza yaratildi. Administrator keyinroq ko'rib chiqadi.",
+        "en": "Request created. An admin will review it later.",
+    },
+    "button.back": {"ru": "Назад", "uz": "Ortga", "en": "Back"},
+    "button.menu": {"ru": "Меню", "uz": "Menyu", "en": "Menu"},
+    "button.buy": {"ru": "Купить", "uz": "Sotib olish", "en": "Buy"},
+    "button.history": {"ru": "История", "uz": "Tarix", "en": "History"},
+    "button.use_saved_gmail": {"ru": "Использовать этот Gmail", "uz": "Shu Gmailni ishlatish", "en": "Use this Gmail"},
+    "button.use_other_gmail": {"ru": "Указать другой Gmail", "uz": "Boshqa Gmail kiritish", "en": "Use another Gmail"},
+}
+_REPLACEABLE_LAYOUT_DEFAULTS: dict[tuple[str, str], dict[str, str]] = {
+    ("main_menu", "catalog"): {"ru": "Подписки", "uz": "Obunalar", "en": "Subscriptions"},
+    ("main_menu", "profile"): {"ru": "Профиль", "uz": "Profil", "en": "Profile"},
+    ("main_menu", "languages"): {"ru": "Языки", "uz": "Tillar", "en": "Languages"},
+    ("main_menu", "support"): {"ru": "Поддержка", "uz": "Qo'llab-quvvatlash", "en": "Support"},
+    ("main_menu", "about"): {"ru": "О нас", "uz": "Biz haqimizda", "en": "About"},
+    ("main_menu", "faq"): {"ru": "FAQ", "uz": "FAQ", "en": "FAQ"},
+}
 
 
 def _slugify(value: str | None) -> str:
@@ -38,6 +124,15 @@ def _slugify(value: str | None) -> str:
     slug = re.sub(r"[\s_]+", "-", slug)
     slug = re.sub(r"[^a-z0-9-]+", "", slug)
     return re.sub(r"-{2,}", "-", slug).strip("-")
+
+
+def _should_replace_seed_text(current_value: str | None, replaceable_default: str | None = None) -> bool:
+    normalized = (current_value or "").strip()
+    if not normalized:
+        return True
+    if replaceable_default is None:
+        return False
+    return normalized == replaceable_default.strip()
 
 
 def _fit_slug(value: str) -> str:
@@ -225,16 +320,15 @@ async def seed_products(session: AsyncSession) -> None:
         if product is None:
             product = Product(code=item["code"])
             session.add(product)
-
-        product.category = categories.get(item["category_code"])
-        product.status = ProductStatus(item["status"])
-        product.delivery_type = item["delivery_type"]
-        product.workflow_type = item["workflow_type"]
-        product.price = Decimal(item["price"])
-        product.currency = item["currency"]
-        product.sort_order = item["sort_order"]
-        product.show_in_catalog = item["show_in_catalog"]
-        product.extra_data = item["extra_data"]
+            product.category = categories.get(item["category_code"])
+            product.status = ProductStatus(item["status"])
+            product.delivery_type = item["delivery_type"]
+            product.workflow_type = item["workflow_type"]
+            product.price = Decimal(item["price"])
+            product.currency = item["currency"]
+            product.sort_order = item["sort_order"]
+            product.show_in_catalog = item["show_in_catalog"]
+            product.extra_data = item["extra_data"]
 
         existing = {tr.language.value: tr for tr in product.translations}
         for lang_code, payload in item["translations"].items():
@@ -242,8 +336,13 @@ async def seed_products(session: AsyncSession) -> None:
             if translation is None:
                 translation = ProductTranslation(product=product, language=Language(lang_code))
                 session.add(translation)
-            translation.name = payload["name"]
-            translation.description = payload["description"]
+                translation.name = payload["name"]
+                translation.description = payload["description"]
+                continue
+            if not translation.name:
+                translation.name = payload["name"]
+            if not translation.description:
+                translation.description = payload["description"]
 
 
 async def seed_payment_methods(session: AsyncSession) -> None:
@@ -252,12 +351,11 @@ async def seed_payment_methods(session: AsyncSession) -> None:
         if payment is None:
             payment = PaymentMethod(code=item["code"])
             session.add(payment)
-
-        payment.provider_type = PaymentProviderType(item["provider_type"])
-        payment.admin_title = item["admin_title"]
-        payment.credentials = item["credentials"]
-        payment.sort_order = item["sort_order"]
-        payment.is_active = True
+            payment.provider_type = PaymentProviderType(item["provider_type"])
+            payment.admin_title = item["admin_title"]
+            payment.credentials = item["credentials"]
+            payment.sort_order = item["sort_order"]
+            payment.is_active = True
 
         existing = {tr.language.value: tr for tr in payment.translations}
         for lang_code, payload in item["translations"].items():
@@ -265,8 +363,13 @@ async def seed_payment_methods(session: AsyncSession) -> None:
             if translation is None:
                 translation = PaymentMethodTranslation(payment_method=payment, language=Language(lang_code))
                 session.add(translation)
-            translation.title = payload["title"]
-            translation.instructions = payload["instructions"]
+                translation.title = payload["title"]
+                translation.instructions = payload["instructions"]
+                continue
+            if not translation.title:
+                translation.title = payload["title"]
+            if not translation.instructions:
+                translation.instructions = payload["instructions"]
 
 
 async def seed_texts(session: AsyncSession) -> None:
@@ -285,7 +388,11 @@ async def seed_texts(session: AsyncSession) -> None:
             if translation is None:
                 translation = TextTranslation(text_entry=entry, language=Language(lang_code))
                 session.add(translation)
-            translation.value = value
+                translation.value = value
+                continue
+            replaceable_default = _REPLACEABLE_TEXT_DEFAULTS.get(code, {}).get(lang_code)
+            if _should_replace_seed_text(translation.value, replaceable_default):
+                translation.value = value
 
 
 async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
@@ -300,10 +407,9 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
         if layout is None:
             layout = Layout(code=item["code"])
             session.add(layout)
-
-        layout.title = item["title"]
-        layout.scope = item["scope"]
-        layout.is_active = True
+            layout.title = item["title"]
+            layout.scope = item["scope"]
+            layout.is_active = True
 
         existing_buttons = {button.code: button for button in layout.buttons}
         for button_data in item["buttons"]:
@@ -311,13 +417,17 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
             if button is None:
                 button = LayoutButton(layout=layout, code=button_data["code"])
                 session.add(button)
-
-            button.action_type = ButtonActionType(button_data["action_type"])
-            button.action_value = replacement_map.get(button_data["action_value"], button_data["action_value"])
-            button.style = button_data["style"]
-            button.row_index = button_data["row_index"]
-            button.sort_order = button_data["sort_order"]
-            button.is_active = True
+                button.action_type = ButtonActionType(button_data["action_type"])
+                button.action_value = replacement_map.get(button_data["action_value"], button_data["action_value"])
+                button.style = button_data["style"]
+                button.row_index = button_data["row_index"]
+                button.sort_order = button_data["sort_order"]
+                button.is_active = True
+            else:
+                if not button.action_value:
+                    button.action_value = replacement_map.get(button_data["action_value"], button_data["action_value"])
+                if not button.style:
+                    button.style = button_data["style"]
 
             existing_translations = {tr.language.value: tr for tr in button.translations}
             for lang_code, text in button_data["translations"].items():
@@ -325,16 +435,19 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
                 if translation is None:
                     translation = LayoutButtonTranslation(button=button, language=Language(lang_code))
                     session.add(translation)
-                translation.text = text
+                    translation.text = text
+                    continue
+                replaceable_default = _REPLACEABLE_LAYOUT_DEFAULTS.get((item["code"], button_data["code"]), {}).get(lang_code)
+                if _should_replace_seed_text(translation.text, replaceable_default):
+                    translation.text = text
 
 
 async def seed_product_payment_links(session: AsyncSession) -> None:
+    if await session.scalar(select(ProductPaymentMethod.id).limit(1)) is not None:
+        return
+
     products = {row.code: row for row in (await session.scalars(select(Product))).all()}
     payments = {row.code: row for row in (await session.scalars(select(PaymentMethod))).all()}
-    existing_links = {
-        (row.product_id, row.payment_method_id): row
-        for row in (await session.scalars(select(ProductPaymentMethod))).all()
-    }
 
     link_map = {
         "chatgpt_plus_month": ["click", "card", "usdt_trc20"],
@@ -351,9 +464,6 @@ async def seed_product_payment_links(session: AsyncSession) -> None:
             payment = payments.get(payment_code)
             if payment is None:
                 continue
-            key = (product.id, payment.id)
-            link = existing_links.get(key)
-            if link is None:
-                link = ProductPaymentMethod(product=product, payment_method=payment)
-                session.add(link)
+            link = ProductPaymentMethod(product=product, payment_method=payment)
+            session.add(link)
             link.sort_order = index * 10

@@ -19,7 +19,14 @@ def build_start_router(app: AppContext, bot: Bot) -> Router:
     async def render_main(target: Message | CallbackQuery, language: str) -> None:
         async with app.session_factory() as session:
             title = await format_text(session, "user.main_title", language, fallback="Subnowa")
-            body = await format_text(session, "user.main_body", language, fallback="Выберите раздел ниже.")
+            body = await format_text(
+                session,
+                "user.main_body",
+                language,
+                fallback="Выберите раздел ниже.",
+                ABOUT_URL=app.settings.about_url,
+                REVIEW_URL=app.settings.review_url,
+            )
             markup = await build_layout_markup(session, "main_menu", language)
         await answer_or_edit(target, f"<b>{title}</b>\n\n{body}", reply_markup=markup)
 
@@ -106,7 +113,7 @@ def build_start_router(app: AppContext, bot: Bot) -> Router:
             callback,
             f"<b>{title}</b>\n\n{body}",
             reply_markup=InlineKeyboardMarkup(
-                inline_keyboard=[[InlineKeyboardButton(text="Назад", callback_data="menu:main")]]
+                inline_keyboard=[[InlineKeyboardButton(text="◀ Назад", callback_data="menu:main")]]
             ),
         )
 
