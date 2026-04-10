@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -26,6 +28,117 @@ from db.models import (
 )
 
 
+_CATEGORY_SLUG_MAX_LENGTH = 64
+
+
+def _slugify(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    slug = ascii_value.strip().lower()
+    slug = re.sub(r"[\s_]+", "-", slug)
+    slug = re.sub(r"[^a-z0-9-]+", "", slug)
+    return re.sub(r"-{2,}", "-", slug).strip("-")
+
+
+def _fit_slug(value: str) -> str:
+    return value[:_CATEGORY_SLUG_MAX_LENGTH].strip("-")
+
+
+def _slug_with_suffix(base: str, suffix: str | None = None) -> str:
+    fitted_base = _fit_slug(base) or "category"
+    if not suffix:
+        return fitted_base
+
+    fitted_suffix = _slugify(suffix)
+    if not fitted_suffix:
+        return fitted_base
+
+    max_base_length = _CATEGORY_SLUG_MAX_LENGTH - len(fitted_suffix) - 1
+    trimmed_base = _fit_slug(fitted_base[:max_base_length]) or "category"
+    return f"{trimmed_base}-{fitted_suffix}"
+
+
+def _category_slug_sources(category: Category | None, item: dict | None = None) -> list[str]:
+    sources: list[str] = []
+    if item is not None:
+        explicit_slug = item.get("slug")
+        if isinstance(explicit_slug, str):
+            sources.append(explicit_slug)
+
+        code = item.get("code")
+        if isinstance(code, str):
+            sources.append(code)
+
+        translations = item.get("translations")
+        if isinstance(translations, dict):
+            for lang_code in (Language.EN.value, Language.UZ.value, Language.RU.value):
+                payload = translations.get(lang_code)
+                if isinstance(payload, dict):
+                    name = payload.get("name")
+                    if isinstance(name, str):
+                        sources.append(name)
+
+    if category is not None:
+        if category.slug:
+            sources.append(category.slug)
+        sources.append(category.code)
+        for translation in category.translations:
+            if translation.name:
+                sources.append(translation.name)
+
+    return sources
+
+
+def _claim_category_slug(
+    category: Category,
+    used_slugs: dict[str, Category],
+    sources: list[str],
+    *,
+    preserve_current: bool,
+) -> str:
+    current_slug = _slugify(category.slug)
+    if current_slug and used_slugs.get(current_slug) is category:
+        used_slugs.pop(current_slug, None)
+
+    ordered_sources: list[str] = []
+    if preserve_current and current_slug:
+        ordered_sources.append(current_slug)
+    ordered_sources.extend(source for source in sources if source)
+
+    base_slug = ""
+    for source in ordered_sources:
+        candidate = _slugify(source)
+        if candidate:
+            base_slug = candidate
+            break
+
+    if not base_slug:
+        base_slug = _slugify(category.code) or "category"
+
+    candidate = _fit_slug(base_slug) or "category"
+    owner = used_slugs.get(candidate)
+    if owner in (None, category):
+        used_slugs[candidate] = category
+        return candidate
+
+    code_slug = _slugify(category.code)
+    if code_slug:
+        candidate = _slug_with_suffix(base_slug, code_slug)
+        owner = used_slugs.get(candidate)
+        if owner in (None, category):
+            used_slugs[candidate] = category
+            return candidate
+
+    counter = 2
+    while True:
+        candidate = _slug_with_suffix(base_slug, str(counter))
+        owner = used_slugs.get(candidate)
+        if owner in (None, category):
+            used_slugs[candidate] = category
+            return candidate
+        counter += 1
+
+
 async def initialize_database(
     engine: AsyncEngine,
     session_factory: async_sessionmaker[AsyncSession],
@@ -37,6 +150,7 @@ async def initialize_database(
     async with session_factory() as session:
         await seed_settings(session, settings)
         await seed_categories(session)
+        await normalize_category_slugs(session)
         await seed_products(session)
         await seed_payment_methods(session)
         await seed_texts(session)
@@ -57,14 +171,27 @@ async def seed_settings(session: AsyncSession, settings: Settings) -> None:
 
 
 async def seed_categories(session: AsyncSession) -> None:
+    categories = (await session.scalars(select(Category))).all()
+    categories_by_code = {row.code: row for row in categories}
+    used_slugs = {
+        normalized_slug: row
+        for row in categories
+        if (normalized_slug := _slugify(row.slug))
+    }
+
     for item in DEFAULT_CATEGORIES:
-        category = await session.scalar(select(Category).where(Category.code == item["code"]))
+        category = categories_by_code.get(item["code"])
         if category is None:
             category = Category(code=item["code"])
             session.add(category)
-            await session.flush()
+            categories_by_code[category.code] = category
 
-        category.slug = item["slug"]
+        category.slug = _claim_category_slug(
+            category,
+            used_slugs,
+            _category_slug_sources(category, item),
+            preserve_current=False,
+        )
         category.sort_order = item["sort_order"]
         category.is_active = item["is_active"]
 
@@ -78,6 +205,19 @@ async def seed_categories(session: AsyncSession) -> None:
             translation.description = payload["description"]
 
 
+async def normalize_category_slugs(session: AsyncSession) -> None:
+    categories = (await session.scalars(select(Category))).all()
+    used_slugs: dict[str, Category] = {}
+
+    for category in sorted(categories, key=lambda row: (row.id or 0, row.code)):
+        category.slug = _claim_category_slug(
+            category,
+            used_slugs,
+            _category_slug_sources(category),
+            preserve_current=True,
+        )
+
+
 async def seed_products(session: AsyncSession) -> None:
     categories = {row.code: row for row in (await session.scalars(select(Category))).all()}
     for item in DEFAULT_PRODUCTS:
@@ -85,7 +225,6 @@ async def seed_products(session: AsyncSession) -> None:
         if product is None:
             product = Product(code=item["code"])
             session.add(product)
-            await session.flush()
 
         product.category = categories.get(item["category_code"])
         product.status = ProductStatus(item["status"])
@@ -113,7 +252,6 @@ async def seed_payment_methods(session: AsyncSession) -> None:
         if payment is None:
             payment = PaymentMethod(code=item["code"])
             session.add(payment)
-            await session.flush()
 
         payment.provider_type = PaymentProviderType(item["provider_type"])
         payment.admin_title = item["admin_title"]
@@ -137,7 +275,6 @@ async def seed_texts(session: AsyncSession) -> None:
         if entry is None:
             entry = TextEntry(code=code)
             session.add(entry)
-            await session.flush()
 
         entry.group_name = payload["group"]
         entry.description = payload["description"]
@@ -163,7 +300,6 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
         if layout is None:
             layout = Layout(code=item["code"])
             session.add(layout)
-            await session.flush()
 
         layout.title = item["title"]
         layout.scope = item["scope"]
@@ -175,7 +311,6 @@ async def seed_layouts(session: AsyncSession, settings: Settings) -> None:
             if button is None:
                 button = LayoutButton(layout=layout, code=button_data["code"])
                 session.add(button)
-                await session.flush()
 
             button.action_type = ButtonActionType(button_data["action_type"])
             button.action_value = replacement_map.get(button_data["action_value"], button_data["action_value"])
