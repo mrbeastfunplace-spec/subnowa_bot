@@ -4,7 +4,7 @@ import re
 import unicodedata
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from config import Settings
@@ -245,6 +245,7 @@ async def initialize_database(
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_factory() as session:
+        await ensure_runtime_schema(session)
         await seed_settings(session, settings)
         await seed_categories(session)
         await normalize_category_slugs(session)
@@ -255,6 +256,20 @@ async def initialize_database(
         await sync_legacy_ui_once(session, settings)
         await seed_product_payment_links(session)
         await session.commit()
+
+
+async def ensure_runtime_schema(session: AsyncSession) -> None:
+    await _ensure_column(session, "orders", "expires_at", "DATETIME")
+
+
+async def _ensure_column(session: AsyncSession, table_name: str, column_name: str, ddl_type: str) -> None:
+    connection = await session.connection()
+    existing_columns = await connection.run_sync(
+        lambda sync_connection: {column["name"] for column in inspect(sync_connection).get_columns(table_name)}
+    )
+    if column_name in existing_columns:
+        return
+    await session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}"))
 
 
 async def seed_settings(session: AsyncSession, settings: Settings) -> None:

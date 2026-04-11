@@ -12,7 +12,7 @@ from db.base import ButtonActionType, Language, OrderStatus, PaymentProviderType
 from db.models import CapCutAccount, Category, Layout, LayoutButton, LayoutButtonTranslation, Order, PaymentMethod, PaymentMethodTranslation, Product, ProductPaymentMethod, ProductTranslation, TextEntry, TextTranslation
 from services.admin import build_stats_text
 from services.buttons import build_layout_markup, get_button, get_layout, list_layouts
-from services.capcut import add_bulk_accounts, add_capcut_account, claim_free_account, count_free_accounts, list_accounts
+from services.capcut import add_bulk_accounts, add_capcut_account, claim_free_account, count_free_accounts, list_accounts, purge_expired_accounts
 from services.catalog import category_name, get_category, get_product, product_name
 from services.context import AppContext
 from services.orders import change_status, get_order_by_id, get_order_by_reference, list_orders
@@ -63,20 +63,186 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
 
     def _order_actions_markup(order: Order) -> InlineKeyboardMarkup:
         rows: list[list[InlineKeyboardButton]] = []
-        if order.status == OrderStatus.WAITING_CHECK:
-            rows.append([InlineKeyboardButton(text="Подтвердить оплату", callback_data=f"admin:approve:{order.id}")])
-            rows.append([InlineKeyboardButton(text="Отклонить", callback_data=f"admin:reject:{order.id}")])
-        elif order.status in {OrderStatus.PAID, OrderStatus.PROCESSING}:
-            rows.append([InlineKeyboardButton(text="Завершить", callback_data=f"admin:complete:{order.id}")])
+        if order.status in {OrderStatus.WAITING_CHECK, OrderStatus.PAID, OrderStatus.PROCESSING}:
+            rows.append([InlineKeyboardButton(text="Подтвердить", callback_data=f"admin:approve:{order.id}")])
             rows.append([InlineKeyboardButton(text="Отклонить", callback_data=f"admin:reject:{order.id}")])
         rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:orders")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
-    async def _send_user_message(telegram_id: int, text: str) -> None:
+    def _user_button_texts(language: str) -> dict[str, str]:
+        if language == "uz":
+            return {
+                "details": "📄 Buyurtma tafsilotlari",
+                "support": "💬 Yordam",
+                "reviews": "💬 Fikrlar",
+                "menu": "🏠 Menu",
+            }
+        if language == "en":
+            return {
+                "details": "📄 Order details",
+                "support": "💬 Support",
+                "reviews": "💬 Reviews",
+                "menu": "🏠 Menu",
+            }
+        return {
+            "details": "📄 Детали заказа",
+            "support": "💬 Поддержка",
+            "reviews": "💬 Отзывы",
+            "menu": "🏠 Меню",
+        }
+
+    def _user_order_markup(language: str, order: Order) -> InlineKeyboardMarkup:
+        labels = _user_button_texts(language)
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=labels["details"], callback_data=f"order:detail:{order.id}")],
+                [InlineKeyboardButton(text=labels["support"], url=app.settings.support_url)],
+                [InlineKeyboardButton(text=labels["reviews"], url=app.settings.review_url)],
+                [InlineKeyboardButton(text=labels["menu"], callback_data="menu:main")],
+            ]
+        )
+
+    def _user_menu_markup(language: str) -> InlineKeyboardMarkup:
+        labels = _user_button_texts(language)
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text=labels["support"], url=app.settings.support_url)],
+                [InlineKeyboardButton(text=labels["menu"], callback_data="menu:main")],
+            ]
+        )
+
+    async def _send_user_message(telegram_id: int, text: str, reply_markup: InlineKeyboardMarkup | None = None) -> None:
         try:
-            await bot.send_message(telegram_id, text)
+            await bot.send_message(telegram_id, text, reply_markup=reply_markup)
         except Exception:
             pass
+
+    async def _user_lang(session, order: Order) -> str:
+        if order.user is None:
+            return order.language or app.settings.default_language
+        return await get_user_language(session, order.user.telegram_id, app.settings.default_language)
+
+    def _processing_notice(language: str, order: Order) -> str:
+        if language == "uz":
+            return (
+                "✅ To'lov tasdiqlandi\n\n"
+                f"Buyurtma: <code>{order.order_number}</code>\n"
+                f"Mahsulot: {escape(order.product_name_snapshot)}\n"
+                "Holat: ishlovga o'tkazildi\n\n"
+                "To'lovingiz qabul qilindi va buyurtma ishga olindi. Hozir jamoamiz ulanishni tayyorlamoqda.\n\n"
+                "Hammasi tayyor bo'lishi bilan shu botda alohida xabar yuboramiz."
+            )
+        if language == "en":
+            return (
+                "✅ Payment confirmed\n\n"
+                f"Order: <code>{order.order_number}</code>\n"
+                f"Product: {escape(order.product_name_snapshot)}\n"
+                "Status: in progress\n\n"
+                "We received your payment and started processing the order. Our team is preparing the activation now.\n\n"
+                "You will get a separate message in this bot as soon as everything is ready."
+            )
+        return (
+            "✅ Оплата подтверждена\n\n"
+            f"Заказ: <code>{order.order_number}</code>\n"
+            f"Товар: {escape(order.product_name_snapshot)}\n"
+            "Статус: передан в работу\n\n"
+            "Мы получили ваш платёж и уже начали обработку заказа. Сейчас готовим подключение.\n\n"
+            "Как только всё будет готово, сразу отправим отдельное сообщение в этом боте."
+        )
+
+    def _completed_notice(language: str, order: Order) -> str:
+        if language == "uz":
+            return (
+                "🎉 Buyurtma tayyor\n\n"
+                f"Buyurtma: <code>{order.order_number}</code>\n"
+                f"Mahsulot: {escape(order.product_name_snapshot)}\n\n"
+                "Ulanish muvaffaqiyatli yakunlandi. Agar faollashtirishdan keyin savollar qolsa, shu botdagi yordam bo'limi orqali yozing."
+            )
+        if language == "en":
+            return (
+                "🎉 Order completed\n\n"
+                f"Order: <code>{order.order_number}</code>\n"
+                f"Product: {escape(order.product_name_snapshot)}\n\n"
+                "Activation is complete. If you need anything after that, contact support from this bot."
+            )
+        return (
+            "🎉 Заказ готов\n\n"
+            f"Заказ: <code>{order.order_number}</code>\n"
+            f"Товар: {escape(order.product_name_snapshot)}\n\n"
+            "Подключение завершено. Если после активации появятся вопросы, напишите в поддержку через этого бота."
+        )
+
+    def _rejected_notice(language: str, order: Order) -> str:
+        if language == "uz":
+            return (
+                "❌ Buyurtma rad etildi\n\n"
+                f"Buyurtma: <code>{order.order_number}</code>\n"
+                "Agar bu xato bo'lsa, yordam xizmatiga murojaat qiling."
+            )
+        if language == "en":
+            return (
+                "❌ Order rejected\n\n"
+                f"Order: <code>{order.order_number}</code>\n"
+                "If this happened by mistake, please contact support."
+            )
+        return (
+            "❌ Заказ отклонён\n\n"
+            f"Заказ: <code>{order.order_number}</code>\n"
+            "Если это произошло по ошибке, пожалуйста, свяжитесь с поддержкой."
+        )
+
+    def _capcut_waiting_notice(language: str, order: Order) -> str:
+        if language == "uz":
+            return (
+                "✅ To'lov tasdiqlandi\n\n"
+                f"Buyurtma: <code>{order.order_number}</code>\n"
+                f"Mahsulot: {escape(order.product_name_snapshot)}\n\n"
+                "To'lov qabul qilindi, lekin hozir CapCut uchun bo'sh akkaunt qolmagan. Buyurtmangiz ishlovda qoldi.\n\n"
+                "Bo'sh akkaunt paydo bo'lishi bilan ma'lumotlarni shu botga yuboramiz."
+            )
+        if language == "en":
+            return (
+                "✅ Payment confirmed\n\n"
+                f"Order: <code>{order.order_number}</code>\n"
+                f"Product: {escape(order.product_name_snapshot)}\n\n"
+                "Your payment is confirmed, but there are no free CapCut accounts right now. The order remains in progress.\n\n"
+                "We will send the account details here as soon as stock appears."
+            )
+        return (
+            "✅ Оплата подтверждена\n\n"
+            f"Заказ: <code>{order.order_number}</code>\n"
+            f"Товар: {escape(order.product_name_snapshot)}\n\n"
+            "Платёж подтверждён, но сейчас нет свободного аккаунта CapCut. Заказ оставлен в работе.\n\n"
+            "Как только появится свободный аккаунт, сразу отправим данные в этот бот."
+        )
+
+    def _capcut_ready_notice(language: str, order: Order, account: CapCutAccount) -> str:
+        if language == "uz":
+            return (
+                "✅ To'lov tasdiqlandi\n\n"
+                "🎬 CapCut Pro tayyor.\n"
+                f"Buyurtma: <code>{order.order_number}</code>\n"
+                f"Login: <code>{account.login}</code>\n"
+                f"Parol: <code>{account.password}</code>\n\n"
+                "Agar boshqa CapCut akkaunti ochiq bo'lsa, avval undan chiqing, keyin yuqoridagi ma'lumotlar bilan kiring."
+            )
+        if language == "en":
+            return (
+                "✅ Payment confirmed\n\n"
+                "🎬 Your CapCut Pro is ready.\n"
+                f"Order: <code>{order.order_number}</code>\n"
+                f"Login: <code>{account.login}</code>\n"
+                f"Password: <code>{account.password}</code>\n\n"
+                "If another CapCut account is currently open, sign out first and then sign in with the credentials above."
+            )
+        return (
+            "✅ Оплата подтверждена\n\n"
+            "🎬 Ваш CapCut Pro готов.\n"
+            f"Заказ: <code>{order.order_number}</code>\n"
+            f"Логин: <code>{account.login}</code>\n"
+            f"Пароль: <code>{account.password}</code>\n\n"
+            "Если у вас уже открыт другой аккаунт CapCut, сначала выйдите из него, а затем войдите по данным выше."
+        )
 
     def _product_list_markup(products: list[Product]) -> InlineKeyboardMarkup:
         rows = [[InlineKeyboardButton(text=f"{product.code} ({product.status.value})", callback_data=f"admin:product:{product.id}")] for product in products]
@@ -218,25 +384,36 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
-            if order.workflow_type == "capcut_auto":
-                account = await claim_free_account(session, order)
-                if account is None:
-                    await change_status(session, order, OrderStatus.PAID, callback.from_user.id, "payment approved, stock empty")
+            language = await _user_lang(session, order)
+            if order.status in {OrderStatus.PAID, OrderStatus.PROCESSING}:
+                if order.workflow_type == "capcut_auto":
+                    account = order.capcut_account or await claim_free_account(session, order)
+                    if account is None:
+                        await callback.answer("Склад CapCut пуст.", show_alert=True)
+                        return
+                    await change_status(session, order, OrderStatus.COMPLETED, callback.from_user.id, "confirmed by admin")
                     await session.commit()
-                    await _send_user_message(order.user.telegram_id, "Оплата подтверждена, но склад CapCut сейчас пуст.")
+                    await _send_user_message(order.user.telegram_id, _capcut_ready_notice(language, order, account), reply_markup=_user_order_markup(language, order))
                 else:
-                    await change_status(session, order, OrderStatus.COMPLETED, callback.from_user.id, "auto issued capcut account")
+                    await change_status(session, order, OrderStatus.COMPLETED, callback.from_user.id, "completed by admin")
                     await session.commit()
-                    await _send_user_message(
-                        order.user.telegram_id,
-                        "Оплата подтверждена.\n\n"
-                        f"Ваш CapCut аккаунт:\nЛогин: <code>{account.login}</code>\nПароль: <code>{account.password}</code>",
-                    )
+                    await _send_user_message(order.user.telegram_id, _completed_notice(language, order), reply_markup=_user_order_markup(language, order))
             else:
-                await change_status(session, order, OrderStatus.PAID, callback.from_user.id, "payment approved")
-                await session.commit()
-                await _send_user_message(order.user.telegram_id, "Оплата подтверждена. Заказ передан в работу.")
-        await callback.answer("Готово")
+                if order.workflow_type == "capcut_auto":
+                    account = await claim_free_account(session, order)
+                    if account is None:
+                        await change_status(session, order, OrderStatus.PROCESSING, callback.from_user.id, "payment approved, stock empty")
+                        await session.commit()
+                        await _send_user_message(order.user.telegram_id, _capcut_waiting_notice(language, order), reply_markup=_user_order_markup(language, order))
+                    else:
+                        await change_status(session, order, OrderStatus.COMPLETED, callback.from_user.id, "auto issued capcut account")
+                        await session.commit()
+                        await _send_user_message(order.user.telegram_id, _capcut_ready_notice(language, order, account), reply_markup=_user_order_markup(language, order))
+                else:
+                    await change_status(session, order, OrderStatus.PROCESSING, callback.from_user.id, "payment approved")
+                    await session.commit()
+                    await _send_user_message(order.user.telegram_id, _processing_notice(language, order), reply_markup=_user_order_markup(language, order))
+        await callback.answer("Подтверждено")
         await admin_order_detail_handler(callback)
 
     @router.callback_query(F.data.startswith("admin:reject:"))
@@ -250,9 +427,10 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
+            language = await _user_lang(session, order)
             await change_status(session, order, OrderStatus.REJECTED, callback.from_user.id, "rejected by admin")
             await session.commit()
-            await _send_user_message(order.user.telegram_id, "Ваш заказ отклонён.")
+            await _send_user_message(order.user.telegram_id, _rejected_notice(language, order), reply_markup=_user_menu_markup(language))
         await callback.answer("Отклонено")
         await admin_order_detail_handler(callback)
 
@@ -267,9 +445,10 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
+            language = await _user_lang(session, order)
             await change_status(session, order, OrderStatus.COMPLETED, callback.from_user.id, "completed by admin")
             await session.commit()
-            await _send_user_message(order.user.telegram_id, "Ваш заказ завершён.")
+            await _send_user_message(order.user.telegram_id, _completed_notice(language, order), reply_markup=_user_order_markup(language, order))
         await callback.answer("Завершено")
         await admin_order_detail_handler(callback)
 
@@ -279,6 +458,8 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             await callback.answer()
             return
         async with app.session_factory() as session:
+            if await purge_expired_accounts(session):
+                await session.commit()
             free_count = await count_free_accounts(session)
             used_count = await session.scalar(select(func.count(CapCutAccount.id)).where(CapCutAccount.is_used.is_(True))) or 0
         await callback.answer()
@@ -316,6 +497,8 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             return
         used = callback.data.endswith("used")
         async with app.session_factory() as session:
+            if await purge_expired_accounts(session):
+                await session.commit()
             accounts = await list_accounts(session, used=used, limit=30)
         lines = [f"<b>{'Выданные' if used else 'Свободные'} аккаунты</b>"]
         lines.append("")

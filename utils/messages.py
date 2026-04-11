@@ -35,7 +35,12 @@ async def answer_or_edit(target: Message | CallbackQuery, text: str, reply_marku
             return
         try:
             if message.photo or message.document:
-                await message.edit_caption(caption=text, reply_markup=reply_markup)
+                try:
+                    await message.delete()
+                    await _safe_send_message(message, text, reply_markup)
+                    return
+                except Exception:
+                    await message.edit_caption(caption=text, reply_markup=reply_markup)
             else:
                 await message.edit_text(text=text, reply_markup=reply_markup)
         except TelegramBadRequest as exc:

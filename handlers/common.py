@@ -196,13 +196,12 @@ def profile_markup(language: str, support_url: str | None = None, include_promo:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def order_detail_markup(order: Order, language: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=order_status_label(order.status.value, language), callback_data="noop")],
-            [InlineKeyboardButton(text=_menu_label(language), callback_data="menu:main")],
-        ]
-    )
+def order_detail_markup(order: Order, language: str, support_url: str | None = None) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=order_status_label(order.status.value, language), callback_data="noop")]]
+    if support_url:
+        rows.append([InlineKeyboardButton(text=_support_label(language), url=support_url)])
+    rows.append([InlineKeyboardButton(text=_menu_label(language), callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def completed_orders_markup(orders: list[Order], language: str) -> InlineKeyboardMarkup:

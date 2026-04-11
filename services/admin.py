@@ -5,9 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.base import OrderStatus, ProductStatus
 from db.models import CapCutAccount, Order, PaymentMethod, Product, TextEntry, User
+from services.capcut import purge_expired_accounts
 
 
 async def build_stats_text(session: AsyncSession) -> str:
+    if await purge_expired_accounts(session):
+        await session.commit()
+
     users_total = await session.scalar(select(func.count(User.id))) or 0
     orders_total = await session.scalar(select(func.count(Order.id))) or 0
     waiting_check = await session.scalar(select(func.count(Order.id)).where(Order.status == OrderStatus.WAITING_CHECK)) or 0

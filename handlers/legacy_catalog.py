@@ -638,7 +638,13 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         )
         await callback.answer()
         if payment_method.code == "click" and CLICK_QR_IMAGE_PATH.exists():
-            await callback.message.answer_photo(
+            if callback.message is not None:
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+            await bot.send_photo(
+                callback.from_user.id,
                 photo=FSInputFile(str(CLICK_QR_IMAGE_PATH)),
                 caption=payment_text,
                 reply_markup=build_payment_back_markup(language, int(order_id), app.settings.support_url),

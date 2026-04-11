@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import timedelta
+
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.base import OrderStatus, utcnow
 from db.models import Order, OrderStatusHistory, PaymentMethod, Product, User
 from services.catalog import product_name
+from utils.formatting import order_duration_days
 from utils.order_numbers import generate_order_number
 
 
@@ -102,7 +105,10 @@ async def change_status(
     old_status = order.status
     order.status = new_status
     if new_status == OrderStatus.COMPLETED:
-        order.completed_at = utcnow()
+        completed_at = utcnow()
+        order.completed_at = completed_at
+        duration_days = order_duration_days(order.product_code_snapshot)
+        order.expires_at = completed_at + timedelta(days=duration_days) if duration_days is not None else None
     order.updated_at = utcnow()
     await add_history(session, order, old_status, new_status, changed_by_telegram_id, note)
     await session.flush()

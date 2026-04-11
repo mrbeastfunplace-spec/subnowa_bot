@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -12,6 +13,7 @@ from config import load_settings
 from db.bootstrap import initialize_database
 from db.session import create_engine_and_session
 from handlers import build_catalog_router, build_profile_router, build_start_router
+from services.capcut import run_capcut_cleanup_loop
 from services.context import AppContext
 
 
@@ -26,6 +28,7 @@ async def main() -> None:
     )
     dp = Dispatcher()
     app = AppContext(settings=settings, session_factory=session_factory)
+    cleanup_task = asyncio.create_task(run_capcut_cleanup_loop(session_factory))
 
     dp.include_router(build_admin_router(app, bot))
     dp.include_router(build_catalog_router(app, bot))
@@ -37,6 +40,9 @@ async def main() -> None:
     except TelegramConflictError:
         print("Polling conflict: another bot instance is already using getUpdates.")
     finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
         await bot.session.close()
         await engine.dispose()
 
