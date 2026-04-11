@@ -259,17 +259,32 @@ async def initialize_database(
 
 
 async def ensure_runtime_schema(session: AsyncSession) -> None:
-    await _ensure_column(session, "orders", "expires_at", "DATETIME")
+    await _ensure_column(
+        session,
+        "orders",
+        "expires_at",
+        {
+            "postgresql": "TIMESTAMP WITH TIME ZONE",
+            "sqlite": "DATETIME",
+            "default": "DATETIME",
+        },
+    )
 
 
-async def _ensure_column(session: AsyncSession, table_name: str, column_name: str, ddl_type: str) -> None:
+async def _ensure_column(session: AsyncSession, table_name: str, column_name: str, ddl_type: str | dict[str, str]) -> None:
     connection = await session.connection()
     existing_columns = await connection.run_sync(
         lambda sync_connection: {column["name"] for column in inspect(sync_connection).get_columns(table_name)}
     )
     if column_name in existing_columns:
         return
-    await session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {ddl_type}"))
+    if isinstance(ddl_type, dict):
+        resolved_type = ddl_type.get(connection.dialect.name, ddl_type.get("default"))
+    else:
+        resolved_type = ddl_type
+    if not resolved_type:
+        raise RuntimeError(f"Unsupported DDL type mapping for {table_name}.{column_name} on {connection.dialect.name}")
+    await session.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {resolved_type}"))
 
 
 async def seed_settings(session: AsyncSession, settings: Settings) -> None:
