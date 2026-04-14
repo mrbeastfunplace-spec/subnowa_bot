@@ -44,6 +44,7 @@ from services.orders import (
 from services.settings import get_setting
 from services.telegram_payments import (
     can_pay_order,
+    create_order_invoice_link,
     invalid_order_text,
     invoice_total_amount,
     payment_provider_name,
@@ -110,6 +111,20 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         if language == "en":
             return "Payment now works only through the Telegram invoice. Open the order again and pay from the invoice message."
         return "Оплата теперь проходит только через Telegram invoice. Откройте заказ заново и оплатите из сообщения со счётом."
+
+    def _capcut_checkout_note(language: str, order_number: str) -> str:
+        if language == "uz":
+            return f"Buyurtma: {order_number}\nQuyidagi “To‘lovga o‘tish” tugmasi orqali Telegram ichida to‘lovni oching."
+        if language == "en":
+            return f"Order: {order_number}\nUse the “Proceed to payment” button below to open payment inside Telegram."
+        return f"Заказ: {order_number}\nНажмите «Перейти к оплате», чтобы открыть оплату внутри Telegram."
+
+    def _capcut_subscription_note(language: str) -> str:
+        if language == "uz":
+            return "To‘lovga o‘tishdan oldin kanalga obuna bo‘ling va keyin tekshirish tugmasini bosing."
+        if language == "en":
+            return "Before payment, subscribe to the channel and then press the verification button."
+        return "Перед оплатой подпишитесь на канал и затем нажмите кнопку проверки."
 
     async def _send_invoice_for_order(
         target: CallbackQuery | Message,
@@ -272,7 +287,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             capcut_card_text(language, product.price if product else 49000),
-            reply_markup=build_capcut_details_markup(language, app.settings.support_url),
+            reply_markup=build_details_markup(language, "capcut_1m"),
         )
 
     @router.callback_query(F.data == "back_to_chatgpt_1m")
@@ -560,6 +575,37 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def buy_capcut_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            product = await get_product_by_code(session, "capcut_pro_month")
+            free_count = await count_free_accounts(session)
+            required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
+            if product is None:
+                await callback.answer()
+                return
+            if free_count <= 0:
+                await callback.answer()
+                await answer_or_edit(
+                    callback,
+                    ui_text(language, "stock_empty"),
+                    reply_markup=build_stock_empty_markup(language, app.settings.support_url),
+                )
+                return
+        await state.clear()
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            f"{capcut_card_text(language, product.price)}\n\n{_capcut_subscription_note(language)}",
+            reply_markup=build_subscription_check_markup(language, required_channel, "capcut:check"),
+        )
+
+    @router.callback_query(F.data == "capcut:check")
+    async def capcut_check_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
+            subscribed = await _check_subscription(bot, required_channel, callback.from_user.id)
+            if not subscribed:
+                await callback.answer(ui_text(language, "trial_not_subscribed"), show_alert=True)
+                return
             user = await get_user_by_telegram_id(session, callback.from_user.id)
             product = await get_product_by_code(session, "capcut_pro_month")
             free_count = await count_free_accounts(session)
@@ -576,17 +622,33 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language)
             order.product_name_snapshot = product_title(language, product.code)
+            try:
+                payment_url = await create_order_invoice_link(
+                    bot,
+                    app.settings,
+                    order,
+                    language=language,
+                )
+            except Exception:
+                await session.rollback()
+                await callback.answer(payment_unavailable_text(language), show_alert=True)
+                return
+            await update_payment_meta(
+                session,
+                order,
+                payment_provider=payment_provider_name(),
+                payment_status="invoice_link_ready",
+                invoice_id=order.order_number,
+                checkout_url=payment_url,
+            )
             await session.commit()
             await state.clear()
             await callback.answer()
-            invoice_sent = await _send_invoice_for_order(callback, session, order, language)
-            if invoice_sent and callback.message is not None:
-                try:
-                    await callback.message.edit_reply_markup(
-                        reply_markup=build_capcut_details_markup(language, app.settings.support_url, order.id)
-                    )
-                except Exception:
-                    pass
+            await answer_or_edit(
+                callback,
+                f"{capcut_card_text(language, product.price)}\n\n{_capcut_checkout_note(language, order.order_number)}",
+                reply_markup=build_capcut_details_markup(language, app.settings.support_url, order.id, payment_url),
+            )
 
     @router.callback_query(F.data.startswith("product:view:"))
     async def legacy_product_view_handler(callback: CallbackQuery, state: FSMContext) -> None:

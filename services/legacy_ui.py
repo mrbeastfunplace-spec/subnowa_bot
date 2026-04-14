@@ -596,14 +596,13 @@ def _capcut_support_label(language: str | None) -> str:
 def build_capcut_details_markup(
     language: str | None,
     support_url: str,
-    order_id: int | None = None,
+    order_id: int,
+    payment_url: str,
 ) -> InlineKeyboardMarkup:
-    pay_callback = f"order:payment_methods:{order_id}" if order_id is not None else "buy_capcut_1m"
-    cancel_callback = f"order:cancel:{order_id}" if order_id is not None else "capcut:cancel"
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=_capcut_payment_label(language), callback_data=pay_callback, style="success")],
-            [InlineKeyboardButton(text=_capcut_cancel_label(language), callback_data=cancel_callback, style="danger")],
+            [InlineKeyboardButton(text=_capcut_payment_label(language), url=payment_url, style="success")],
+            [InlineKeyboardButton(text=_capcut_cancel_label(language), callback_data=f"order:cancel:{order_id}", style="danger")],
             [InlineKeyboardButton(text=text(language, "btn_menu"), callback_data="menu:main")],
             [InlineKeyboardButton(text=_capcut_support_label(language), url=support_url)],
         ]

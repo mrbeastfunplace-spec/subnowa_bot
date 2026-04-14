@@ -153,3 +153,21 @@ async def send_order_invoice(
         provider_token=(settings.payment_provider_token or "").strip(),
         start_parameter=invoice_start_parameter(order),
     )
+
+
+async def create_order_invoice_link(
+    bot: Bot,
+    settings: Settings,
+    order: Order,
+    *,
+    language: str,
+) -> str:
+    title, description = _copy_for_order(order, language)
+    return await bot.create_invoice_link(
+        title=title,
+        description=description,
+        payload=invoice_payload(order),
+        currency=_invoice_currency(order),
+        prices=invoice_prices(order, language),
+        provider_token=(settings.payment_provider_token or "").strip(),
+    )
