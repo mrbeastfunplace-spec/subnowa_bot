@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal, ROUND_HALF_UP
 
 from aiogram import Bot
@@ -33,14 +34,14 @@ _PRODUCT_COPY = {
     },
     "capcut_pro_month": {
         "title": {
-            "ru": "CapCut Pro",
-            "uz": "CapCut Pro",
-            "en": "CapCut Pro",
+            "ru": "CapCut Pro (1 месяц)",
+            "uz": "CapCut Pro (1 oy)",
+            "en": "CapCut Pro (1 month)",
         },
         "description": {
-            "ru": "49 000 сум ($4.04)",
-            "uz": "49 000 so'm ($4.04)",
-            "en": "49 000 UZS ($4.04)",
+            "ru": "Доступ на 30 дней. Готовый аккаунт отправим после оплаты.",
+            "uz": "30 kunlik kirish. To‘lovdan keyin tayyor akkaunt yuboriladi.",
+            "en": "30-day access. Ready account is sent after payment.",
         },
     },
 }
@@ -62,6 +63,12 @@ def can_pay_order(order: Order) -> bool:
 
 def invoice_payload(order: Order) -> str:
     return order.order_number
+
+
+def invoice_start_parameter(order: Order) -> str:
+    raw = (order.order_number or "order").lower()
+    normalized = re.sub(r"[^a-z0-9_-]+", "-", raw).strip("-") or "order"
+    return f"subnowa-{normalized}"[:64]
 
 
 def payment_provider_name() -> str:
@@ -95,6 +102,10 @@ def pre_checkout_error_text(language: str) -> str:
 def _currency_exponent(currency: str) -> int:
     normalized = (currency or "").upper()
     return _CURRENCY_EXPONENTS.get(normalized, _DEFAULT_EXPONENT)
+
+
+def _invoice_currency(order: Order) -> str:
+    return (order.currency or "UZS").upper()
 
 
 def _total_amount(order: Order) -> int:
@@ -137,7 +148,8 @@ async def send_order_invoice(
         title=title,
         description=description,
         payload=invoice_payload(order),
-        currency=order.currency,
+        currency=_invoice_currency(order),
         prices=invoice_prices(order, language),
-        provider_token=settings.payment_provider_token,
+        provider_token=(settings.payment_provider_token or "").strip(),
+        start_parameter=invoice_start_parameter(order),
     )

@@ -14,6 +14,7 @@ from services.catalog import get_product, get_product_by_code
 from services.context import AppContext
 from services.legacy_ui import (
     build_capcut_menu_markup,
+    build_capcut_details_markup,
     build_details_markup,
     build_gmail_choice_markup,
     build_menu_only_markup,
@@ -99,9 +100,6 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
 
     async def _send_text(target: CallbackQuery | Message, text: str) -> None:
         if isinstance(target, CallbackQuery):
-            if target.message is not None:
-                await target.message.answer(text)
-                return
             await target.answer(text, show_alert=True)
             return
         await target.answer(text)
@@ -274,7 +272,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             capcut_card_text(language, product.price if product else 49000),
-            reply_markup=build_details_markup(language, "capcut_1m"),
+            reply_markup=build_capcut_details_markup(language, app.settings.support_url),
         )
 
     @router.callback_query(F.data == "back_to_chatgpt_1m")
@@ -283,6 +281,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
 
     @router.callback_query(F.data == "back_to_capcut_1m")
     async def back_to_capcut_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        await open_capcut_handler(callback, state)
+
+    @router.callback_query(F.data == "capcut:cancel")
+    async def capcut_cancel_handler(callback: CallbackQuery, state: FSMContext) -> None:
         await open_capcut_handler(callback, state)
 
     @router.callback_query(F.data.in_({"multi_chatgpt", "multi_capcut"}))
@@ -577,7 +579,14 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await session.commit()
             await state.clear()
             await callback.answer()
-            await _send_invoice_for_order(callback, session, order, language)
+            invoice_sent = await _send_invoice_for_order(callback, session, order, language)
+            if invoice_sent and callback.message is not None:
+                try:
+                    await callback.message.edit_reply_markup(
+                        reply_markup=build_capcut_details_markup(language, app.settings.support_url, order.id)
+                    )
+                except Exception:
+                    pass
 
     @router.callback_query(F.data.startswith("product:view:"))
     async def legacy_product_view_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -749,7 +758,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if not can_pay_order(order):
                 await query.answer(ok=False, error_message=invalid_order_text(language))
                 return
-            if query.currency != order.currency or query.total_amount != invoice_total_amount(order):
+            if query.currency != (order.currency or "").upper() or query.total_amount != invoice_total_amount(order):
                 await query.answer(ok=False, error_message=pre_checkout_error_text(language))
                 return
         await query.answer(ok=True)
@@ -765,7 +774,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await message.answer(pre_checkout_error_text(app.settings.default_language))
                 return
-            if payment.currency != order.currency or payment.total_amount != invoice_total_amount(order):
+            if payment.currency != (order.currency or "").upper() or payment.total_amount != invoice_total_amount(order):
                 await message.answer(pre_checkout_error_text(order.language or app.settings.default_language))
                 return
 
