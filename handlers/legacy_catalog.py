@@ -112,19 +112,34 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             return "Payment now works only through the Telegram invoice. Open the order again and pay from the invoice message."
         return "Оплата теперь проходит только через Telegram invoice. Откройте заказ заново и оплатите из сообщения со счётом."
 
-    def _capcut_checkout_note(language: str, order_number: str) -> str:
+    def _capcut_subscription_text(language: str) -> str:
         if language == "uz":
-            return f"Buyurtma: {order_number}\nQuyidagi “To‘lovga o‘tish” tugmasi orqali Telegram ichida to‘lovni oching."
+            return "<b>CapCut Pro</b>\n\nTo'lovga o'tishdan oldin kanalga obuna bo'ling.\nKeyin <b>Obunani tekshirish</b> tugmasini bosing."
         if language == "en":
-            return f"Order: {order_number}\nUse the “Proceed to payment” button below to open payment inside Telegram."
-        return f"Заказ: {order_number}\nНажмите «Перейти к оплате», чтобы открыть оплату внутри Telegram."
+            return "<b>CapCut Pro</b>\n\nBefore payment, subscribe to the channel.\nThen press <b>Check subscription</b>."
+        return "<b>CapCut Pro</b>\n\nПеред оплатой подпишитесь на канал.\nПосле этого нажмите <b>Проверить подписку</b>."
 
-    def _capcut_subscription_note(language: str) -> str:
+    def _capcut_checkout_text(language: str, order_number: str) -> str:
         if language == "uz":
-            return "To‘lovga o‘tishdan oldin kanalga obuna bo‘ling va keyin tekshirish tugmasini bosing."
+            return (
+                f"<b>CapCut Pro</b>\n\n"
+                f"Buyurtma: <code>{order_number}</code>\n"
+                "To'lov tayyor.\n"
+                "<b>To‘lovga o‘tish</b> tugmasi orqali Telegram ichida to'lovni oching."
+            )
         if language == "en":
-            return "Before payment, subscribe to the channel and then press the verification button."
-        return "Перед оплатой подпишитесь на канал и затем нажмите кнопку проверки."
+            return (
+                f"<b>CapCut Pro</b>\n\n"
+                f"Order: <code>{order_number}</code>\n"
+                "Payment is ready.\n"
+                "Use <b>Proceed to payment</b> to open payment inside Telegram."
+            )
+        return (
+            f"<b>CapCut Pro</b>\n\n"
+            f"Заказ: <code>{order_number}</code>\n"
+            "Оплата готова.\n"
+            "Нажмите <b>Перейти к оплате</b>, чтобы открыть оплату внутри Telegram."
+        )
 
     async def _send_invoice_for_order(
         target: CallbackQuery | Message,
@@ -593,7 +608,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await callback.answer()
         await answer_or_edit(
             callback,
-            f"{capcut_card_text(language, product.price)}\n\n{_capcut_subscription_note(language)}",
+            _capcut_subscription_text(language),
             reply_markup=build_subscription_check_markup(language, required_channel, "capcut:check"),
         )
 
@@ -646,7 +661,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await callback.answer()
             await answer_or_edit(
                 callback,
-                f"{capcut_card_text(language, product.price)}\n\n{_capcut_checkout_note(language, order.order_number)}",
+                _capcut_checkout_text(language, order.order_number),
                 reply_markup=build_capcut_details_markup(language, app.settings.support_url, order.id, payment_url),
             )
 
