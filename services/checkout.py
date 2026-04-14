@@ -84,6 +84,13 @@ def build_checkout_entry_url(settings: Settings, order_number: str) -> str:
     return f"{base_url}/checkout/{quote(order_number, safe='')}"
 
 
+def build_checkout_link_markup(checkout_url: str, language: str) -> InlineKeyboardMarkup:
+    labels = _labels(language)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=labels["button"], url=checkout_url, style="success")]]
+    )
+
+
 def build_checkout_markup(settings: Settings, order_number: str, language: str) -> InlineKeyboardMarkup:
     labels = _labels(language)
     url = build_checkout_entry_url(settings, order_number)

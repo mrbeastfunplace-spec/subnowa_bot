@@ -1,26 +1,26 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from html import escape
-from pathlib import Path
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from db.base import OrderStatus
 from handlers.common import profile_markup
 from services.capcut import count_free_accounts
 from services.catalog import get_product, get_product_by_code
+from services.checkout import build_checkout_link_markup, build_order_card_text
 from services.context import AppContext
 from services.legacy_ui import (
     build_capcut_menu_markup,
     build_details_markup,
     build_gmail_choice_markup,
-    build_invoice_markup,
     build_menu_only_markup,
     build_other_menu_markup,
-    build_payment_back_markup,
     build_single_back_markup,
     build_stock_empty_markup,
     build_subscription_check_markup,
@@ -28,16 +28,13 @@ from services.legacy_ui import (
     build_chatgpt_menu_markup,
     capcut_card_text,
     chatgpt_card_text,
-    crypto_price_for_product,
-    invoice_text,
     multi_service_name,
     other_request_name,
-    payment_instruction_text,
     product_title,
     text as ui_text,
 )
-from services.orders import attach_payment_method, change_status, create_custom_request, create_order, get_order_by_id, save_payment_proof
-from services.payments import get_payment_method, list_product_payment_methods
+from services.multicard import MulticardError, convert_uzs_to_usd, create_invoice
+from services.orders import change_status, create_custom_request, create_order, get_order_by_id, update_payment_meta
 from services.settings import get_setting
 from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
 from states import UserFlowState
@@ -46,9 +43,6 @@ from utils.messages import answer_or_edit
 
 
 GMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@gmail\.com$", re.IGNORECASE)
-CARD_NUMBER = "9860100126034816"
-USDT_TRC20_ADDRESS = "TUr3m7sAWpiysQs5S1jQkbxcvJARqAD8Rs"
-CLICK_QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "media" / "click.png.jpg"
 
 
 def _is_valid_gmail(value: str) -> bool:
@@ -78,6 +72,38 @@ async def _notify_admins(bot: Bot, app: AppContext, text: str, order_id: int | N
             continue
 
 
+def _append_query(url: str, **params: str) -> str:
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update({key: value for key, value in params.items() if value})
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+
+
+def _invoice_active(order) -> bool:
+    if not order.checkout_url or not order.invoice_expiry_at:
+        return False
+    expiry_at = order.invoice_expiry_at
+    if expiry_at.tzinfo is None:
+        expiry_at = expiry_at.replace(tzinfo=timezone.utc)
+    return expiry_at > datetime.now(timezone.utc)
+
+
+def _invoice_error_text(language: str) -> str:
+    if language == "uz":
+        return "Multicard invoice yaratib bo'lmadi. Iltimos, keyinroq qayta urinib ko'ring."
+    if language == "en":
+        return "Unable to create a Multicard invoice right now. Please try again a bit later."
+    return "Не удалось создать счёт Multicard. Пожалуйста, попробуйте ещё раз чуть позже."
+
+
+def _checkout_redirect_text(language: str) -> str:
+    if language == "uz":
+        return "To'lov endi Multicard checkout orqali amalga oshiriladi. Quyida amal qiluvchi to'lov havolasini yubordim."
+    if language == "en":
+        return "Payments now go through Multicard checkout. I sent the active payment link below."
+    return "Оплата теперь проходит через Multicard checkout. Ниже отправил актуальную ссылку на оплату."
+
+
 def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     router = Router(name="legacy_catalog")
 
@@ -88,12 +114,82 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             reply_markup=build_subscriptions_markup(language),
         )
 
-    async def _show_invoice(callback: CallbackQuery, order, language: str, payment_methods: list[object]) -> None:
-        await answer_or_edit(
-            callback,
-            invoice_text(language, order.product_code_snapshot, order.order_number, order.amount),
-            reply_markup=build_invoice_markup(language, order.id, payment_methods),
-        )
+    async def _prepare_checkout_card(order_id: int, language: str):
+        async with app.session_factory() as session:
+            order = await get_order_by_id(session, order_id)
+            if order is None:
+                return None
+            try:
+                price_usd = await convert_uzs_to_usd(order.amount)
+            except Exception:
+                return "error", None
+            checkout_url = (order.checkout_url or "").strip()
+            if not _invoice_active(order) or order.payment_status == "failed" or not checkout_url:
+                try:
+                    invoice = await create_invoice(
+                        app.settings,
+                        amount_uzs=order.amount,
+                        invoice_id=order.order_number,
+                        language=language,
+                        callback_url=_append_query(app.settings.multicard_callback_url, order=order.order_number),
+                        return_url=_append_query(app.settings.multicard_return_url, order=order.order_number),
+                    )
+                except MulticardError:
+                    return "error", None
+                await update_payment_meta(
+                    session,
+                    order,
+                    payment_provider="multicard",
+                    payment_status="",
+                    invoice_id=invoice.invoice_id,
+                    invoice_uuid=invoice.uuid,
+                    checkout_url=invoice.checkout_url,
+                    invoice_expiry_at=invoice.expiry_at,
+                )
+                await session.commit()
+                checkout_url = invoice.checkout_url.strip()
+            if not checkout_url:
+                return "error", None
+            return (
+                build_order_card_text(order, language, price_usd),
+                build_checkout_link_markup(checkout_url, language),
+            )
+
+    async def _show_invoice(callback: CallbackQuery, order, language: str) -> None:
+        presentation = await _prepare_checkout_card(order.id, language)
+        if presentation is None:
+            await answer_or_edit(callback, "Заказ не найден.")
+            return
+        if presentation[0] == "error":
+            await answer_or_edit(callback, _invoice_error_text(language))
+            return
+        text, markup = presentation
+        await answer_or_edit(callback, text, reply_markup=markup)
+
+    async def _send_invoice_message(message: Message, order_id: int, language: str) -> None:
+        presentation = await _prepare_checkout_card(order_id, language)
+        if presentation is None:
+            await message.answer("Заказ не найден.")
+            return
+        if presentation[0] == "error":
+            await message.answer(_invoice_error_text(language))
+            return
+        text, markup = presentation
+        await message.answer(text, reply_markup=markup)
+
+    async def _redirect_to_checkout(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+        await state.clear()
+        await message.answer(_checkout_redirect_text(language))
+        if order_id and order is None:
+            await message.answer("Заказ не найден.")
+            return
+        if order is not None:
+            await _send_invoice_message(message, order.id, language)
 
     @router.callback_query(F.data.in_({"menu:catalog", "open_subscriptions"}))
     async def open_catalog_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -479,11 +575,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language, details={"gmail": gmail})
             order.product_name_snapshot = product_title(language, product.code)
-            payment_methods = await list_product_payment_methods(session, product)
             await session.commit()
         await state.clear()
         await callback.answer()
-        await _show_invoice(callback, order, language, payment_methods)
+        await _show_invoice(callback, order, language)
         await _notify_admins(
             bot,
             app,
@@ -516,11 +611,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language)
             order.product_name_snapshot = product_title(language, product.code)
-            payment_methods = await list_product_payment_methods(session, product)
             await session.commit()
         await state.clear()
         await callback.answer()
-        await _show_invoice(callback, order, language, payment_methods)
+        await _show_invoice(callback, order, language)
 
     @router.callback_query(F.data.startswith("product:view:"))
     async def legacy_product_view_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -564,12 +658,11 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             order = await get_order_by_id(session, order_id)
-            if order is None or order.product is None:
+            if order is None:
                 await callback.answer()
                 return
-            payment_methods = await list_product_payment_methods(session, order.product)
         await callback.answer()
-        await _show_invoice(callback, order, language, payment_methods)
+        await _show_invoice(callback, order, language)
 
     @router.callback_query(F.data.startswith("order:promo:"))
     async def order_promo_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -592,69 +685,31 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
             await state.clear()
-            await message.answer("К сожалению, такого промокода не существует.")
-            if return_to == "profile":
-                display_name = escape(user_display_name(message.from_user, message.from_user.id))
-                await message.answer(
-                    "<b>Ваш профиль\n\nВыберите раздел 👇</b>\n\n"
-                    f"Пользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
-                    reply_markup=profile_markup(language, app.settings.support_url),
-                )
-                return
-            if isinstance(return_to, str) and return_to.startswith("payment:"):
-                order_id = int(return_to.split(":")[-1])
-                order = await get_order_by_id(session, order_id)
-                if order is None or order.product is None:
-                    return
-                payment_methods = await list_product_payment_methods(session, order.product)
-                await message.answer(
-                    invoice_text(language, order.product_code_snapshot, order.order_number, order.amount),
-                    reply_markup=build_invoice_markup(language, order.id, payment_methods),
-                )
+        await message.answer("К сожалению, такого промокода не существует.")
+        if return_to == "profile":
+            display_name = escape(user_display_name(message.from_user, message.from_user.id))
+            await message.answer(
+                "<b>Ваш профиль\n\nВыберите раздел 👇</b>\n\n"
+                f"Пользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
+                reply_markup=profile_markup(language, app.settings.support_url),
+            )
+            return
+        if isinstance(return_to, str) and return_to.startswith("payment:"):
+            order_id = int(return_to.split(":")[-1])
+            await _send_invoice_message(message, order_id, language)
 
     @router.callback_query(F.data.startswith("order:pay:"))
     async def order_payment_method_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        _, _, order_id, payment_id = callback.data.split(":")
+        _, _, order_id, _ = callback.data.split(":")
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             order = await get_order_by_id(session, int(order_id))
-            payment_method = await get_payment_method(session, int(payment_id))
-            if order is None or payment_method is None:
+            if order is None:
                 await callback.answer()
                 return
-            await attach_payment_method(session, order, payment_method)
-            await session.commit()
-        await state.set_state(UserFlowState.waiting_payment_proof)
-        await state.update_data(order_id=int(order_id))
-        payment_text = payment_instruction_text(
-            language,
-            payment_method.code,
-            order.order_number,
-            order.product_name_snapshot,
-            order.amount,
-            crypto_price_for_product(order.product_code_snapshot),
-            CARD_NUMBER,
-            USDT_TRC20_ADDRESS,
-        )
+        await state.clear()
         await callback.answer()
-        if payment_method.code == "click" and CLICK_QR_IMAGE_PATH.exists():
-            if callback.message is not None:
-                try:
-                    await callback.message.delete()
-                except Exception:
-                    pass
-            await bot.send_photo(
-                callback.from_user.id,
-                photo=FSInputFile(str(CLICK_QR_IMAGE_PATH)),
-                caption=payment_text,
-                reply_markup=build_payment_back_markup(language, int(order_id), app.settings.support_url),
-            )
-            return
-        await answer_or_edit(
-            callback,
-            payment_text,
-            reply_markup=build_payment_back_markup(language, int(order_id), app.settings.support_url),
-        )
+        await _show_invoice(callback, order, language)
 
     @router.callback_query(F.data.startswith("order:cancel:"))
     async def order_cancel_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -678,72 +733,14 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
 
     @router.message(UserFlowState.waiting_payment_proof, F.photo)
     async def payment_photo_handler(message: Message, state: FSMContext) -> None:
-        data = await state.get_data()
-        order_id = data.get("order_id")
-        if not order_id:
-            await message.answer("Заказ для чека не найден.")
-            return
-        async with app.session_factory() as session:
-            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            order = await get_order_by_id(session, int(order_id))
-            if order is None:
-                await message.answer("Заказ не найден.")
-                return
-            await save_payment_proof(session, order, message.photo[-1].file_id, "photo", changed_by_telegram_id=message.from_user.id)
-            await session.commit()
-        await state.clear()
-        await message.answer(ui_text(language, "payment_check_saved"))
-        for admin_id in app.settings.admin_ids:
-            try:
-                await bot.send_photo(
-                    admin_id,
-                    photo=message.photo[-1].file_id,
-                    caption=(
-                        "Новый чек\n\n"
-                        f"Заказ: <code>{order.order_number}</code>\n"
-                        f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
-                        f"Товар: {escape(order.product_name_snapshot)}"
-                    ),
-                    reply_markup=_admin_order_markup(order.id),
-                )
-            except Exception:
-                continue
+        await _redirect_to_checkout(message, state)
 
     @router.message(UserFlowState.waiting_payment_proof, F.document)
     async def payment_document_handler(message: Message, state: FSMContext) -> None:
-        data = await state.get_data()
-        order_id = data.get("order_id")
-        if not order_id:
-            await message.answer("Заказ для чека не найден.")
-            return
-        async with app.session_factory() as session:
-            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            order = await get_order_by_id(session, int(order_id))
-            if order is None:
-                await message.answer("Заказ не найден.")
-                return
-            await save_payment_proof(session, order, message.document.file_id, "document", changed_by_telegram_id=message.from_user.id)
-            await session.commit()
-        await state.clear()
-        await message.answer(ui_text(language, "payment_check_saved"))
-        for admin_id in app.settings.admin_ids:
-            try:
-                await bot.send_document(
-                    admin_id,
-                    document=message.document.file_id,
-                    caption=(
-                        "Новый чек\n\n"
-                        f"Заказ: <code>{order.order_number}</code>\n"
-                        f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
-                        f"Товар: {escape(order.product_name_snapshot)}"
-                    ),
-                    reply_markup=_admin_order_markup(order.id),
-                )
-            except Exception:
-                continue
+        await _redirect_to_checkout(message, state)
 
     @router.message(UserFlowState.waiting_payment_proof)
-    async def payment_invalid_handler(message: Message) -> None:
-        await message.answer("Отправьте чек фотографией или документом.")
+    async def payment_invalid_handler(message: Message, state: FSMContext) -> None:
+        await _redirect_to_checkout(message, state)
 
     return router
