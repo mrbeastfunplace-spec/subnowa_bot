@@ -1,20 +1,16 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from html import escape
-import logging
 import re
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery
 
 from db.base import OrderStatus
 from handlers.common import profile_markup
 from services.capcut import count_free_accounts
 from services.catalog import get_product, get_product_by_code
-from services.checkout import build_checkout_link_markup, build_order_card_text
 from services.context import AppContext
 from services.legacy_ui import (
     build_capcut_menu_markup,
@@ -34,9 +30,27 @@ from services.legacy_ui import (
     product_title,
     text as ui_text,
 )
-from services.multicard import MulticardError, convert_uzs_to_usd, create_invoice
-from services.orders import change_status, create_custom_request, create_order, get_order_by_id, update_payment_meta
+from services.order_processing import mark_order_paid
+from services.orders import (
+    change_status,
+    create_custom_request,
+    create_order,
+    get_order_by_id,
+    get_order_by_number,
+    store_checkout_message_ref,
+    update_payment_meta,
+)
 from services.settings import get_setting
+from services.telegram_payments import (
+    can_pay_order,
+    invalid_order_text,
+    invoice_total_amount,
+    payment_provider_name,
+    payment_unavailable_text,
+    pre_checkout_error_text,
+    provider_token_enabled,
+    send_order_invoice,
+)
 from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
 from states import UserFlowState
 from utils.formatting import user_display_name
@@ -44,7 +58,6 @@ from utils.messages import answer_or_edit
 
 
 GMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@gmail\.com$", re.IGNORECASE)
-logger = logging.getLogger(__name__)
 
 
 def _is_valid_gmail(value: str) -> bool:
@@ -74,38 +87,6 @@ async def _notify_admins(bot: Bot, app: AppContext, text: str, order_id: int | N
             continue
 
 
-def _append_query(url: str, **params: str) -> str:
-    parsed = urlsplit(url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query.update({key: value for key, value in params.items() if value})
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
-
-
-def _invoice_active(order) -> bool:
-    if not order.checkout_url or not order.invoice_expiry_at:
-        return False
-    expiry_at = order.invoice_expiry_at
-    if expiry_at.tzinfo is None:
-        expiry_at = expiry_at.replace(tzinfo=timezone.utc)
-    return expiry_at > datetime.now(timezone.utc)
-
-
-def _invoice_error_text(language: str) -> str:
-    if language == "uz":
-        return "Multicard invoice yaratib bo'lmadi. Iltimos, keyinroq qayta urinib ko'ring."
-    if language == "en":
-        return "Unable to create a Multicard invoice right now. Please try again a bit later."
-    return "Не удалось создать счёт Multicard. Пожалуйста, попробуйте ещё раз чуть позже."
-
-
-def _checkout_redirect_text(language: str) -> str:
-    if language == "uz":
-        return "To'lov endi Multicard checkout orqali amalga oshiriladi. Quyida amal qiluvchi to'lov havolasini yubordim."
-    if language == "en":
-        return "Payments now go through Multicard checkout. I sent the active payment link below."
-    return "Оплата теперь проходит через Multicard checkout. Ниже отправил актуальную ссылку на оплату."
-
-
 def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     router = Router(name="legacy_catalog")
 
@@ -116,86 +97,61 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             reply_markup=build_subscriptions_markup(language),
         )
 
-    async def _prepare_checkout_card(order_id: int, language: str):
-        async with app.session_factory() as session:
-            order = await get_order_by_id(session, order_id)
-            if order is None:
-                return None
-            try:
-                price_usd = await convert_uzs_to_usd(order.amount)
-            except Exception:
-                return "error", None
-            checkout_url = (order.checkout_url or "").strip()
-            if not _invoice_active(order) or order.payment_status == "failed" or not checkout_url:
-                try:
-                    invoice = await create_invoice(
-                        app.settings,
-                        amount_uzs=order.amount,
-                        invoice_id=order.order_number,
-                        language=language,
-                        callback_url=_append_query(app.settings.multicard_callback_url, order=order.order_number),
-                        return_url=_append_query(app.settings.multicard_return_url, order=order.order_number),
-                    )
-                except MulticardError as exc:
-                    logger.exception("Failed to create Multicard invoice for order %s: %s", order.order_number, exc)
-                    return "error", None
-                await update_payment_meta(
-                    session,
-                    order,
-                    payment_provider="multicard",
-                    payment_status="",
-                    invoice_id=invoice.invoice_id,
-                    invoice_uuid=invoice.uuid,
-                    checkout_url=invoice.checkout_url,
-                    invoice_expiry_at=invoice.expiry_at,
-                )
-                await session.commit()
-                checkout_url = invoice.checkout_url.strip()
-            if not checkout_url:
-                return "error", None
-            return (
-                build_order_card_text(order, language, price_usd),
-                build_checkout_link_markup(checkout_url, language),
+    async def _send_text(target: CallbackQuery | Message, text: str) -> None:
+        if isinstance(target, CallbackQuery):
+            if target.message is not None:
+                await target.message.answer(text)
+                return
+            await target.answer(text, show_alert=True)
+            return
+        await target.answer(text)
+
+    def _manual_payment_removed_text(language: str) -> str:
+        if language == "uz":
+            return "To'lov endi faqat Telegram ichidagi invoice orqali o'tadi. Buyurtmani qayta ochib invoice yuborilgan xabardan to'lang."
+        if language == "en":
+            return "Payment now works only through the Telegram invoice. Open the order again and pay from the invoice message."
+        return "Оплата теперь проходит только через Telegram invoice. Откройте заказ заново и оплатите из сообщения со счётом."
+
+    async def _send_invoice_for_order(
+        target: CallbackQuery | Message,
+        session,
+        order,
+        language: str,
+    ) -> bool:
+        if not provider_token_enabled(app.settings):
+            await _send_text(target, payment_unavailable_text(language))
+            return False
+        if not can_pay_order(order):
+            await _send_text(target, invalid_order_text(language))
+            return False
+        try:
+            invoice_message = await send_order_invoice(
+                bot,
+                app.settings,
+                order,
+                chat_id=target.from_user.id,
+                language=language,
             )
+        except Exception:
+            await _send_text(target, payment_unavailable_text(language))
+            return False
 
-    async def _show_invoice(callback: CallbackQuery, order, language: str) -> None:
-        presentation = await _prepare_checkout_card(order.id, language)
-        if presentation is None:
-            await answer_or_edit(callback, "Заказ не найден.")
-            return
-        if presentation[0] == "error":
-            if callback.message is not None:
-                await callback.message.answer(_invoice_error_text(language))
-            else:
-                await answer_or_edit(callback, _invoice_error_text(language))
-            return
-        text, markup = presentation
-        await answer_or_edit(callback, text, reply_markup=markup)
-
-    async def _send_invoice_message(message: Message, order_id: int, language: str) -> None:
-        presentation = await _prepare_checkout_card(order_id, language)
-        if presentation is None:
-            await message.answer("Заказ не найден.")
-            return
-        if presentation[0] == "error":
-            await message.answer(_invoice_error_text(language))
-            return
-        text, markup = presentation
-        await message.answer(text, reply_markup=markup)
-
-    async def _redirect_to_checkout(message: Message, state: FSMContext) -> None:
-        data = await state.get_data()
-        order_id = data.get("order_id")
-        async with app.session_factory() as session:
-            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            order = await get_order_by_id(session, int(order_id)) if order_id else None
-        await state.clear()
-        await message.answer(_checkout_redirect_text(language))
-        if order_id and order is None:
-            await message.answer("Заказ не найден.")
-            return
-        if order is not None:
-            await _send_invoice_message(message, order.id, language)
+        await update_payment_meta(
+            session,
+            order,
+            payment_provider=payment_provider_name(),
+            payment_status="invoice_sent",
+            invoice_id=order.order_number,
+        )
+        await store_checkout_message_ref(
+            session,
+            order,
+            chat_id=invoice_message.chat.id,
+            message_id=invoice_message.message_id,
+        )
+        await session.commit()
+        return True
 
     @router.callback_query(F.data.in_({"menu:catalog", "open_subscriptions"}))
     async def open_catalog_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -582,9 +538,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             order = await create_order(session, user=user, product=product, language=language, details={"gmail": gmail})
             order.product_name_snapshot = product_title(language, product.code)
             await session.commit()
-        await state.clear()
-        await callback.answer()
-        await _show_invoice(callback, order, language)
+            await state.clear()
+            await callback.answer()
+            if not await _send_invoice_for_order(callback, session, order, language):
+                return
         await _notify_admins(
             bot,
             app,
@@ -618,9 +575,9 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             order = await create_order(session, user=user, product=product, language=language)
             order.product_name_snapshot = product_title(language, product.code)
             await session.commit()
-        await state.clear()
-        await callback.answer()
-        await _show_invoice(callback, order, language)
+            await state.clear()
+            await callback.answer()
+            await _send_invoice_for_order(callback, session, order, language)
 
     @router.callback_query(F.data.startswith("product:view:"))
     async def legacy_product_view_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -667,8 +624,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
-        await callback.answer()
-        await _show_invoice(callback, order, language)
+            await callback.answer()
+            await _send_invoice_for_order(callback, session, order, language)
 
     @router.callback_query(F.data.startswith("order:promo:"))
     async def order_promo_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -702,7 +659,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             return
         if isinstance(return_to, str) and return_to.startswith("payment:"):
             order_id = int(return_to.split(":")[-1])
-            await _send_invoice_message(message, order_id, language)
+            async with app.session_factory() as session:
+                order = await get_order_by_id(session, order_id)
+                if order is None:
+                    await message.answer(_manual_payment_removed_text(language))
+                    return
+                await _send_invoice_for_order(message, session, order, language)
 
     @router.callback_query(F.data.startswith("order:pay:"))
     async def order_payment_method_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -713,9 +675,9 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
-        await state.clear()
-        await callback.answer()
-        await _show_invoice(callback, order, language)
+            await state.clear()
+            await callback.answer()
+            await _send_invoice_for_order(callback, session, order, language)
 
     @router.callback_query(F.data.startswith("order:cancel:"))
     async def order_cancel_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -739,14 +701,89 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
 
     @router.message(UserFlowState.waiting_payment_proof, F.photo)
     async def payment_photo_handler(message: Message, state: FSMContext) -> None:
-        await _redirect_to_checkout(message, state)
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        await state.clear()
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+            if order is None:
+                await message.answer(_manual_payment_removed_text(language))
+                return
+            await _send_invoice_for_order(message, session, order, language)
 
     @router.message(UserFlowState.waiting_payment_proof, F.document)
     async def payment_document_handler(message: Message, state: FSMContext) -> None:
-        await _redirect_to_checkout(message, state)
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        await state.clear()
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+            if order is None:
+                await message.answer(_manual_payment_removed_text(language))
+                return
+            await _send_invoice_for_order(message, session, order, language)
 
     @router.message(UserFlowState.waiting_payment_proof)
     async def payment_invalid_handler(message: Message, state: FSMContext) -> None:
-        await _redirect_to_checkout(message, state)
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        await state.clear()
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+            if order is None:
+                await message.answer(_manual_payment_removed_text(language))
+                return
+            await _send_invoice_for_order(message, session, order, language)
+
+    @router.pre_checkout_query()
+    async def pre_checkout_handler(query: PreCheckoutQuery) -> None:
+        async with app.session_factory() as session:
+            order = await get_order_by_number(session, query.invoice_payload)
+            language = order.language if order is not None else app.settings.default_language
+            if order is None:
+                await query.answer(ok=False, error_message=pre_checkout_error_text(language))
+                return
+            if not can_pay_order(order):
+                await query.answer(ok=False, error_message=invalid_order_text(language))
+                return
+            if query.currency != order.currency or query.total_amount != invoice_total_amount(order):
+                await query.answer(ok=False, error_message=pre_checkout_error_text(language))
+                return
+        await query.answer(ok=True)
+
+    @router.message(F.successful_payment)
+    async def successful_payment_handler(message: Message) -> None:
+        payment = message.successful_payment
+        if payment is None:
+            return
+
+        async with app.session_factory() as session:
+            order = await get_order_by_number(session, payment.invoice_payload)
+            if order is None:
+                await message.answer(pre_checkout_error_text(app.settings.default_language))
+                return
+            if payment.currency != order.currency or payment.total_amount != invoice_total_amount(order):
+                await message.answer(pre_checkout_error_text(order.language or app.settings.default_language))
+                return
+
+            await update_payment_meta(
+                session,
+                order,
+                payment_provider=payment_provider_name(),
+                payment_status="paid",
+                invoice_id=payment.telegram_payment_charge_id,
+                invoice_uuid=payment.provider_payment_charge_id,
+            )
+            await mark_order_paid(
+                session,
+                bot,
+                app.settings,
+                order,
+                note="telegram_payments:successful_payment",
+            )
+            await session.commit()
 
     return router
