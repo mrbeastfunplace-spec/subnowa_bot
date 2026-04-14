@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -111,6 +112,16 @@ def _error_details(payload: Any) -> str:
     return "Unknown Multicard error"
 
 
+def _text_error_details(body: str, *, status: int) -> str:
+    text = (body or "").strip()
+    if not text:
+        return f"Multicard returned an empty response (HTTP {status})"
+    compact = " ".join(text.split())
+    if len(compact) > 300:
+        compact = f"{compact[:297]}..."
+    return f"Multicard returned a non-JSON response (HTTP {status}): {compact}"
+
+
 async def _request_json(
     method: str,
     url: str,
@@ -120,7 +131,11 @@ async def _request_json(
 ) -> Any:
     async with ClientSession(timeout=REQUEST_TIMEOUT) as session:
         async with session.request(method, url, headers=headers, json=json_body) as response:
-            payload = await response.json(content_type=None)
+            body = await response.text()
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError as exc:
+                raise MulticardError(_text_error_details(body, status=response.status)) from exc
             if response.status >= 400:
                 raise MulticardError(_error_details(payload))
             return payload
