@@ -14,6 +14,7 @@ from db.bootstrap import initialize_database
 from db.session import create_engine_and_session
 from handlers import build_catalog_router, build_profile_router, build_start_router
 from services.capcut import run_capcut_cleanup_loop
+from services.checkout_server import start_checkout_server
 from services.context import AppContext
 
 
@@ -29,6 +30,7 @@ async def main() -> None:
     dp = Dispatcher()
     app = AppContext(settings=settings, session_factory=session_factory)
     cleanup_task = asyncio.create_task(run_capcut_cleanup_loop(session_factory))
+    http_runner = await start_checkout_server(app, bot)
 
     dp.include_router(build_admin_router(app, bot))
     dp.include_router(build_catalog_router(app, bot))
@@ -43,6 +45,7 @@ async def main() -> None:
         cleanup_task.cancel()
         with suppress(asyncio.CancelledError):
             await cleanup_task
+        await http_runner.cleanup()
         await bot.session.close()
         await engine.dispose()
 

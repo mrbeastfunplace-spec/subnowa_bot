@@ -11,17 +11,17 @@ from db.base import OrderStatus
 from handlers.common import (
     categories_markup,
     gmail_choice_markup,
-    payment_back_markup,
-    payment_methods_markup,
     profile_markup,
     product_markup,
     products_markup,
 )
 from services.capcut import count_free_accounts
 from services.catalog import category_name, get_category, get_product, get_product_by_code, list_categories, list_category_products, render_product_text
+from services.checkout import build_checkout_markup, build_order_card_text
 from services.context import AppContext
-from services.orders import attach_payment_method, change_status, create_custom_request, create_order, get_order_by_id, save_payment_proof
-from services.payments import get_payment_method, list_product_payment_methods, payment_instruction
+from services.multicard import convert_uzs_to_usd
+from services.orders import change_status, create_custom_request, create_order, get_order_by_id
+from services.payments import list_product_payment_methods
 from services.settings import get_setting
 from services.texts import format_text
 from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
@@ -57,6 +57,14 @@ def _is_valid_gmail(value: str) -> bool:
     return bool(GMAIL_PATTERN.match(value.strip()))
 
 
+def _rate_error_text(language: str) -> str:
+    if language == "uz":
+        return "USD kursini olib bo'lmadi. Iltimos, birozdan keyin qayta urinib ko'ring."
+    if language == "en":
+        return "Could not fetch the USD exchange rate right now. Please try again in a moment."
+    return "Сейчас не удалось получить курс USD. Пожалуйста, попробуйте ещё раз через минуту."
+
+
 async def _notify_admins(bot: Bot, app: AppContext, text: str, order_id: int | None = None) -> None:
     markup = None
     if order_id:
@@ -80,6 +88,31 @@ async def _check_subscription(bot: Bot, channel: str, user_id: int) -> bool:
 
 def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     router = Router(name="catalog")
+
+    async def _show_checkout_card(target: CallbackQuery, order, language: str) -> bool:
+        try:
+            price_usd = await convert_uzs_to_usd(order.amount)
+        except Exception:
+            await answer_or_edit(target, _rate_error_text(language))
+            return False
+        await answer_or_edit(
+            target,
+            build_order_card_text(order, language, price_usd),
+            reply_markup=build_checkout_markup(app.settings, order.order_number, language),
+        )
+        return True
+
+    async def _send_checkout_card(message: Message, order, language: str) -> bool:
+        try:
+            price_usd = await convert_uzs_to_usd(order.amount)
+        except Exception:
+            await message.answer(_rate_error_text(language))
+            return False
+        await message.answer(
+            build_order_card_text(order, language, price_usd),
+            reply_markup=build_checkout_markup(app.settings, order.order_number, language),
+        )
+        return True
 
     @router.callback_query(F.data == "menu:catalog")
     async def open_catalog_handler(callback: CallbackQuery) -> None:
@@ -255,6 +288,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                     ),
                 )
                 return
+            try:
+                price_usd = await convert_uzs_to_usd(product.price)
+            except Exception:
+                await callback.answer()
+                await answer_or_edit(callback, _rate_error_text(language))
+                return
             order = await create_order(session, user=user, product=product, language=language)
             methods = await list_product_payment_methods(session, product)
             payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
@@ -263,8 +302,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await callback.answer()
         await answer_or_edit(
             callback,
-            f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
-            reply_markup=payment_methods_markup(order.id, methods, language, app.settings.support_url, allow_promo=True),
+            build_order_card_text(order, language, price_usd),
+            reply_markup=build_checkout_markup(app.settings, order.order_number, language),
         )
         await _notify_admins(
             bot,
@@ -369,6 +408,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if user is None or product is None:
                 await callback.answer()
                 return
+            try:
+                price_usd = await convert_uzs_to_usd(product.price)
+            except Exception:
+                await callback.answer()
+                await answer_or_edit(callback, _rate_error_text(language))
+                return
             order = await create_order(session, user=user, product=product, language=language, details={"gmail": gmail})
             methods = await list_product_payment_methods(session, product)
             payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
@@ -377,8 +422,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await callback.answer()
         await answer_or_edit(
             callback,
-            f"<b>{order.product_name_snapshot}</b>\n\n{payment_text}",
-            reply_markup=payment_methods_markup(order.id, methods, language, app.settings.support_url, allow_promo=True),
+            build_order_card_text(order, language, price_usd),
+            reply_markup=build_checkout_markup(app.settings, order.order_number, language),
         )
         await _notify_admins(
             bot,
@@ -396,6 +441,9 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if order is None or order.product is None:
                 await callback.answer()
                 return
+            await callback.answer()
+            await _show_checkout_card(callback, order, language)
+            return
             methods = await list_product_payment_methods(session, order.product)
             payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
         await callback.answer()
@@ -408,6 +456,16 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     @router.callback_query(F.data.startswith("order:promo:"))
     async def order_promo_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
         order_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, order_id)
+            if order is None:
+                await callback.answer()
+                return
+        await state.clear()
+        await callback.answer()
+        await _show_checkout_card(callback, order, language)
+        return
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             prompt = await format_text(session, "user.promo_enter", language, fallback="Введите промокод.")
@@ -444,6 +502,16 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 order = await get_order_by_id(session, order_id)
                 if order is None or order.product is None:
                     return
+                try:
+                    price_usd = await convert_uzs_to_usd(order.amount)
+                except Exception:
+                    await message.answer(_rate_error_text(language))
+                    return
+                await message.answer(
+                    build_order_card_text(order, language, price_usd),
+                    reply_markup=build_checkout_markup(app.settings, order.order_number, language),
+                )
+                return
                 methods = await list_product_payment_methods(session, order.product)
                 payment_text = await format_text(session, "user.choose_payment_method", language, fallback="Выберите способ оплаты.")
                 await message.answer(
@@ -457,10 +525,21 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             order = await get_order_by_id(session, int(order_id))
+            if order is None:
+                await callback.answer()
+                return
+            await state.clear()
+            await callback.answer()
+            await _show_checkout_card(callback, order, language)
+            return
             payment_method = await get_payment_method(session, int(payment_id))
             if order is None or payment_method is None:
                 await callback.answer()
                 return
+            await state.clear()
+            await callback.answer()
+            await _show_checkout_card(callback, order, language)
+            return
             await attach_payment_method(session, order, payment_method)
             instruction = payment_instruction(payment_method, language)
             payment_prompt = await format_text(session, "user.send_payment_proof", language, fallback="После оплаты отправьте чек.")
@@ -494,6 +573,15 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def payment_photo_handler(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         order_id = data.get("order_id")
+        await state.clear()
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+        if order is None:
+            await message.answer("Оплата теперь проходит через checkout-страницу. Откройте заказ заново и нажмите кнопку оплаты.")
+            return
+        await _send_checkout_card(message, order, language)
+        return
         if not order_id:
             await message.answer("Заказ для чека не найден.")
             return
@@ -531,6 +619,15 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def payment_document_handler(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         order_id = data.get("order_id")
+        await state.clear()
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+        if order is None:
+            await message.answer("Оплата теперь проходит через checkout-страницу. Откройте заказ заново и нажмите кнопку оплаты.")
+            return
+        await _send_checkout_card(message, order, language)
+        return
         if not order_id:
             await message.answer("Заказ для чека не найден.")
             return
@@ -565,7 +662,18 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 continue
 
     @router.message(UserFlowState.waiting_payment_proof)
-    async def payment_invalid_proof_handler(message: Message) -> None:
+    async def payment_invalid_proof_handler(message: Message, state: FSMContext) -> None:
+        data = await state.get_data()
+        order_id = data.get("order_id")
+        await state.clear()
+        async with app.session_factory() as session:
+            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            order = await get_order_by_id(session, int(order_id)) if order_id else None
+        if order is None:
+            await message.answer("Оплата теперь проходит через checkout-страницу. Откройте заказ заново и используйте кнопку оплаты.")
+            return
+        await _send_checkout_card(message, order, language)
+        return
         await message.answer("Отправьте чек фотографией или документом.")
 
     return router

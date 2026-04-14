@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.base import OrderStatus, utcnow
@@ -121,6 +121,58 @@ async def attach_payment_method(session: AsyncSession, order: Order, payment_met
     return order
 
 
+def _normalize_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+async def update_payment_meta(
+    session: AsyncSession,
+    order: Order,
+    *,
+    payment_provider: str | None = None,
+    payment_status: str | None = None,
+    invoice_id: str | None = None,
+    invoice_uuid: str | None = None,
+    checkout_url: str | None = None,
+    invoice_expiry_at: datetime | None = None,
+) -> Order:
+    if payment_provider is not None:
+        order.payment_provider = payment_provider
+    if payment_status is not None:
+        order.payment_status = payment_status
+    if invoice_id is not None:
+        order.invoice_id = invoice_id
+    if invoice_uuid is not None:
+        order.invoice_uuid = invoice_uuid
+    if checkout_url is not None:
+        order.checkout_url = checkout_url
+    if invoice_expiry_at is not None or order.invoice_expiry_at is not None:
+        order.invoice_expiry_at = _normalize_datetime(invoice_expiry_at)
+    order.updated_at = utcnow()
+    await session.flush()
+    return order
+
+
+async def store_checkout_message_ref(
+    session: AsyncSession,
+    order: Order,
+    *,
+    chat_id: int,
+    message_id: int,
+) -> Order:
+    details = dict(order.details or {})
+    details["checkout_message_chat_id"] = int(chat_id)
+    details["checkout_message_id"] = int(message_id)
+    order.details = details
+    order.updated_at = utcnow()
+    await session.flush()
+    return order
+
+
 async def save_payment_proof(
     session: AsyncSession,
     order: Order,
@@ -144,6 +196,20 @@ async def get_order_by_id(session: AsyncSession, order_id: int) -> Order | None:
 
 async def get_order_by_number(session: AsyncSession, order_number: str) -> Order | None:
     return await session.scalar(select(Order).where(Order.order_number == order_number))
+
+
+async def get_order_by_invoice_reference(session: AsyncSession, reference: str) -> Order | None:
+    cleaned = (reference or "").strip()
+    if not cleaned:
+        return None
+    return await session.scalar(
+        select(Order).where(
+            or_(
+                Order.invoice_id == cleaned,
+                Order.invoice_uuid == cleaned,
+            )
+        )
+    )
 
 
 async def get_order_by_reference(session: AsyncSession, reference: str) -> Order | None:

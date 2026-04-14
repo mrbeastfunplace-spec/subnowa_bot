@@ -31,6 +31,88 @@ from db.models import (
 _CATEGORY_SLUG_MAX_LENGTH = 64
 _LEGACY_UI_SYNC_SETTING_KEY = "system.legacy_ui_sync_version"
 _LEGACY_UI_SYNC_VERSION = "2026-04-11-legacy-ui-v2"
+_MULTICARD_TEXT_SYNC_SETTING_KEY = "system.multicard_checkout_sync_version"
+_MULTICARD_TEXT_SYNC_VERSION = "2026-04-14-multicard-checkout-v1"
+_MULTICARD_TEXT_OVERRIDES: dict[str, dict[str, str]] = {
+    "user.faq_body": {
+        "ru": (
+            "1. Что я получу после оплаты?\n"
+            "Вы получите подтверждение заказа и дальнейшие инструкции по подключению.\n\n"
+            "2. Как подключается ChatGPT Plus?\n"
+            "Мы отправляем приглашение на ваш Gmail, после принятия подписка активируется.\n\n"
+            "3. Как подключается CapCut Pro?\n"
+            "После подтверждения оплаты вы получаете готовые данные для входа.\n\n"
+            "4. Сколько времени занимает подключение?\n"
+            "Обычно от нескольких минут до нескольких часов, в зависимости от очереди.\n\n"
+            "5. Как проходит оплата?\n"
+            "Оплата открывается на защищённой checkout-странице Multicard. После оплаты статус заказа обновляется автоматически.\n\n"
+            "6. Нужен ли VPN для использования?\n"
+            "В большинстве случаев нет.\n\n"
+            "7. Можно ли заказать несколько аккаунтов?\n"
+            "Да, используйте кнопку «Хочу несколько», и администратор обработает заявку.\n\n"
+            "8. Что делать, если письмо не пришло?\n"
+            "Проверьте папки «Спам» и «Промоакции», затем напишите в поддержку.\n\n"
+            "9. Можно ли заказать другой сервис?\n"
+            "Да, в разделе «Другое» можно оставить заявку на нужную подписку.\n\n"
+            "10. Что делать, если возникла проблема после покупки?\n"
+            "Напишите в поддержку, указав номер заказа и суть проблемы."
+        ),
+        "uz": (
+            "1. To‘lovdan keyin nima olaman?\n"
+            "Buyurtma tasdig‘i va ulash bo‘yicha ko‘rsatmalar olasiz.\n\n"
+            "2. ChatGPT Plus qanday ulanadi?\n"
+            "Gmail'ingizga yuborilgan havolani tasdiqlaysiz va obuna faollashadi.\n\n"
+            "3. CapCut Pro qanday beriladi?\n"
+            "To‘lov tasdiqlangach, tayyor login va parol yuboriladi.\n\n"
+            "4. Ulanish qancha vaqt oladi?\n"
+            "Odatda bir necha daqiqadan bir necha soatgacha.\n\n"
+            "5. To‘lov qanday amalga oshadi?\n"
+            "To‘lov Multicard himoyalangan checkout sahifasida ochiladi. To‘lovdan keyin buyurtma holati avtomatik yangilanadi.\n\n"
+            "6. VPN kerakmi?\n"
+            "Ko‘p hollarda yo‘q.\n\n"
+            "7. Bir nechta akkaunt buyurtma qilish mumkinmi?\n"
+            "Ha, «Bir nechta kerak» tugmasi orqali so‘rov yuboring.\n\n"
+            "8. Xat kelmasa nima qilaman?\n"
+            "Spam va Promotions papkalarini tekshiring, keyin yordamga yozing.\n\n"
+            "9. Boshqa xizmat buyurtma qilish mumkinmi?\n"
+            "Ha, «Boshqa» bo‘limida so‘rov qoldiring.\n\n"
+            "10. Xariddan keyin muammo bo‘lsa nima qilaman?\n"
+            "Buyurtma raqami bilan yordam xizmatiga yozing."
+        ),
+        "en": (
+            "1. What do I receive after payment?\n"
+            "You receive order confirmation and connection instructions.\n\n"
+            "2. How is ChatGPT Plus activated?\n"
+            "We send an invitation to your Gmail and the subscription activates after you accept it.\n\n"
+            "3. How is CapCut Pro delivered?\n"
+            "After payment confirmation you receive ready-to-use login details.\n\n"
+            "4. How long does activation take?\n"
+            "Usually from a few minutes to a few hours.\n\n"
+            "5. How does payment work?\n"
+            "Payment opens on the secure Multicard checkout page. After payment, the order status updates automatically.\n\n"
+            "6. Do I need a VPN?\n"
+            "Usually no.\n\n"
+            "7. Can I order several accounts?\n"
+            "Yes, use the several-accounts button and the admin will process it.\n\n"
+            "8. What if the email does not arrive?\n"
+            "Check Spam and Promotions, then contact support.\n\n"
+            "9. Can I request another service?\n"
+            "Yes, use the Other section and send your request.\n\n"
+            "10. What should I do if there is a problem after purchase?\n"
+            "Contact support and include your order number."
+        ),
+    },
+    "user.choose_payment_method": {
+        "ru": "Перейдите к оплате.",
+        "uz": "To‘lovga o‘ting.",
+        "en": "Proceed to payment.",
+    },
+    "user.send_payment_proof": {
+        "ru": "После оплаты статус заказа обновится автоматически.",
+        "uz": "To‘lovdan keyin buyurtma holati avtomatik yangilanadi.",
+        "en": "The order status will update automatically after payment.",
+    },
+}
 _REPLACEABLE_TEXT_DEFAULTS: dict[str, dict[str, str]] = {
     "user.main_title": {"ru": "Subnowa", "uz": "Subnowa", "en": "Subnowa"},
     "user.main_body": {"ru": "Выберите раздел ниже.", "uz": "Quyidagi bo'limlardan birini tanlang.", "en": "Choose a section below."},
@@ -254,6 +336,7 @@ async def initialize_database(
         await seed_texts(session)
         await seed_layouts(session, settings)
         await sync_legacy_ui_once(session, settings)
+        await sync_multicard_payment_copy_once(session)
         await seed_product_payment_links(session)
         await session.commit()
 
@@ -263,6 +346,21 @@ async def ensure_runtime_schema(session: AsyncSession) -> None:
         session,
         "orders",
         "expires_at",
+        {
+            "postgresql": "TIMESTAMP WITH TIME ZONE",
+            "sqlite": "DATETIME",
+            "default": "DATETIME",
+        },
+    )
+    await _ensure_column(session, "orders", "payment_provider", {"postgresql": "VARCHAR(32)", "sqlite": "TEXT", "default": "TEXT"})
+    await _ensure_column(session, "orders", "payment_status", {"postgresql": "VARCHAR(32)", "sqlite": "TEXT", "default": "TEXT"})
+    await _ensure_column(session, "orders", "invoice_id", {"postgresql": "VARCHAR(255)", "sqlite": "TEXT", "default": "TEXT"})
+    await _ensure_column(session, "orders", "invoice_uuid", {"postgresql": "VARCHAR(64)", "sqlite": "TEXT", "default": "TEXT"})
+    await _ensure_column(session, "orders", "checkout_url", {"postgresql": "TEXT", "sqlite": "TEXT", "default": "TEXT"})
+    await _ensure_column(
+        session,
+        "orders",
+        "invoice_expiry_at",
         {
             "postgresql": "TIMESTAMP WITH TIME ZONE",
             "sqlite": "DATETIME",
@@ -500,6 +598,41 @@ async def sync_legacy_ui_once(session: AsyncSession, settings: Settings) -> None
     marker.value = _LEGACY_UI_SYNC_VERSION
     marker.value_type = "string"
     marker.description = "One-time legacy UI sync marker"
+
+
+async def sync_multicard_payment_copy_once(session: AsyncSession) -> None:
+    marker = await session.scalar(select(Setting).where(Setting.key == _MULTICARD_TEXT_SYNC_SETTING_KEY))
+    if marker is not None and marker.value == _MULTICARD_TEXT_SYNC_VERSION:
+        return
+
+    for code, translations in _MULTICARD_TEXT_OVERRIDES.items():
+        entry = await session.scalar(select(TextEntry).where(TextEntry.code == code))
+        payload = DEFAULT_TEXTS.get(code, {})
+        if entry is None:
+            entry = TextEntry(code=code)
+            entry.group_name = payload.get("group", "user")
+            entry.description = payload.get("description", "")
+            session.add(entry)
+            await session.flush()
+        else:
+            if payload:
+                entry.group_name = payload.get("group", entry.group_name)
+                entry.description = payload.get("description", entry.description)
+
+        existing = {tr.language.value: tr for tr in entry.translations}
+        for lang_code, value in translations.items():
+            translation = existing.get(lang_code)
+            if translation is None:
+                translation = TextTranslation(text_entry=entry, language=Language(lang_code))
+                session.add(translation)
+            translation.value = value
+
+    if marker is None:
+        marker = Setting(key=_MULTICARD_TEXT_SYNC_SETTING_KEY)
+        session.add(marker)
+    marker.value = _MULTICARD_TEXT_SYNC_VERSION
+    marker.value_type = "string"
+    marker.description = "One-time Multicard checkout text sync marker"
 
 
 async def seed_product_payment_links(session: AsyncSession) -> None:
