@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from html import escape
+import logging
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -43,6 +44,7 @@ from utils.messages import answer_or_edit
 
 
 GMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@gmail\.com$", re.IGNORECASE)
+logger = logging.getLogger(__name__)
 
 
 def _is_valid_gmail(value: str) -> bool:
@@ -134,7 +136,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                         callback_url=_append_query(app.settings.multicard_callback_url, order=order.order_number),
                         return_url=_append_query(app.settings.multicard_return_url, order=order.order_number),
                     )
-                except MulticardError:
+                except MulticardError as exc:
+                    logger.exception("Failed to create Multicard invoice for order %s: %s", order.order_number, exc)
                     return "error", None
                 await update_payment_meta(
                     session,
@@ -161,7 +164,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await answer_or_edit(callback, "Заказ не найден.")
             return
         if presentation[0] == "error":
-            await answer_or_edit(callback, _invoice_error_text(language))
+            if callback.message is not None:
+                await callback.message.answer(_invoice_error_text(language))
+            else:
+                await answer_or_edit(callback, _invoice_error_text(language))
             return
         text, markup = presentation
         await answer_or_edit(callback, text, reply_markup=markup)

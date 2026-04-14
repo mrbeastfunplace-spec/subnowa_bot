@@ -196,7 +196,7 @@ async def create_invoice(
     token = await authenticate(settings)
     payload = await _request_json(
         "POST",
-        f"{settings.multicard_base_url}/api/payment/invoice",
+        f"{settings.multicard_base_url}/payment/invoice",
         headers=_auth_headers(token),
         json_body={
             "store_id": settings.multicard_store_id,
