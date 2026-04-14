@@ -41,6 +41,7 @@ class Settings:
     about_url: str
     review_url: str
     required_channel: str
+    payment_provider_token: str = ""
     default_language: str = "ru"
     admin_language: str = "ru"
     trial_duration_days: int = 3
@@ -90,6 +91,7 @@ def load_settings() -> Settings:
         about_url=os.getenv("ABOUT_URL", "https://subnowa.site").strip(),
         review_url=os.getenv("REVIEW_URL", "https://t.me/subbowaotzib").strip(),
         required_channel=os.getenv("REQUIRED_CHANNEL", "@UZB_TREND_MUCIQALAR_BASS_HIT").strip(),
+        payment_provider_token=os.getenv("PAYMENT_PROVIDER_TOKEN", "").strip(),
         default_language=os.getenv("DEFAULT_LANGUAGE", "ru").strip() or "ru",
         admin_language="ru",
         trial_duration_days=int(os.getenv("TRIAL_DURATION_DAYS", "3")),

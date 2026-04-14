@@ -80,6 +80,36 @@ async def resolve_user_language(session: AsyncSession, settings: Settings, order
 
 
 def paid_notice(language: str, order: Order) -> str:
+    if order.product_code_snapshot == "chatgpt_plus_month":
+        order_no = escape(order.order_number)
+        separator = "──────────────────────"
+        if language == "uz":
+            return (
+                "🎉 Buyurtma tayyor\n\n"
+                f"Buyurtma: {order_no}\n"
+                "Mahsulot: ChatGPT PLUS (1 oy)\n\n"
+                f"{separator}\n\n"
+                "biz havolani emailingizga yubordik, tasdiqlagandan so‘ng sizga 30 kunlik PLUS versiya mavjud bo‘ladi\n\n"
+                f"{separator}"
+            )
+        if language == "en":
+            return (
+                "🎉 Order completed\n\n"
+                f"Order: {order_no}\n"
+                "Product: ChatGPT PLUS (1 month)\n\n"
+                f"{separator}\n\n"
+                "we have sent a link to your email, after confirmation you will get 30 days of ChatGPT PLUS\n\n"
+                f"{separator}"
+            )
+        return (
+            "🎉 Заказ готов\n\n"
+            f"Заказ: {order_no}\n"
+            "Товар: ChatGPT PLUS (1 месяц)\n\n"
+            f"{separator}\n\n"
+            "мы отправили ссылку на вашу почту, после подтвеждение вам будет доступно 30 дней PLUS версия ChatGPT\n\n"
+            f"{separator}"
+        )
+
     product_name = escape(order.product_name_snapshot)
     order_no = escape(order.order_number)
     if language == "uz":

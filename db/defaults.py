@@ -71,15 +71,76 @@ DEFAULT_PRODUCTS = [
         "translations": {
             Language.RU.value: {
                 "name": "CapCut Pro",
-                "description": "CapCut Pro на 1 месяц.\n\nПосле подтверждения оплаты бот автоматически выдаёт логин и пароль.",
+                "description": (
+                    "💠 Товар: CapCut Pro (1 месяц)\n"
+                    "💰 Стоимость: 49,000 сум (~350 ₽)\n"
+                    "—————————————————-\n"
+                    "⚙️ Как проходит подключение\n"
+                    "1. Мы отправляем вам готовый аккаунт который создается после заказа\n"
+                    "2. Вы скопируете эти данные ввиде(login,parol) и вставляете capcut\n"
+                    "3. если у вас есть аккаунт то сначала вам нужно выйти и зайти способом\n"
+                    "<<войти через почту>>\n"
+                    "⏱ Срок действия — 30 дней с момента активации\n\n"
+                    "🔐 Безопасность\n"
+                    "— Без вылетов\n"
+                    "— Вход осуществляется только вами\n"
+                    "— Используются официальные методы подключения\n\n"
+                    "— Поддержка на всех этапах подключения 💬\n"
+                    "— Доступно для пользователей из СНГ и других стран\n"
+                    "⸻\n"
+                    "✅ Преимущества\n"
+                    "✔️ Быстрое подключение\n"
+                    "✔️ Прозрачные условия\n"
+                    "✔️ Сопровождение после покупки"
+                ),
             },
             Language.UZ.value: {
                 "name": "CapCut Pro",
-                "description": "1 oylik CapCut Pro.\n\nTo'lov tasdiqlangach bot login va parolni avtomatik beradi.",
+                "description": (
+                    "💠 Mahsulot: CapCut Pro (1 oy)\n"
+                    "💰 Narxi: 49,000 so‘m (350 ₽)\n"
+                    "—————————————————-\n"
+                    "⚙️ Qanday ulanadi\n"
+                    "1. Buyurtmadan so‘ng sizga tayyor аккаунт yuboramiz\n"
+                    "2. Siz login va parolni nusxalab CapCut ga kiritasiz\n"
+                    "3. Agar sizda аккаунт bo‘lsa, avval chiqib, “email orqali kirish” orqali qayta kiring\n"
+                    "⏱ Amal qilish muddati — 30 kun\n\n"
+                    "🔐 Xavfsizlik\n"
+                    "— Hech qanday uzilishlarsiz\n"
+                    "— Faqat siz kirishingiz mumkin\n"
+                    "— Rasmiy ulanish usullari\n\n"
+                    "— Har bosqichda yordam 💬\n"
+                    "— MDH va boshqa davlatlar uchun mavjud\n"
+                    "⸻\n"
+                    "✅ Afzalliklar\n"
+                    "✔️ Tez ulanish\n"
+                    "✔️ Shaffof shartlar\n"
+                    "✔️ Sotib olgandan keyin qo‘llab-quvvatlash"
+                ),
             },
             Language.EN.value: {
                 "name": "CapCut Pro",
-                "description": "CapCut Pro for 1 month.\n\nAfter payment confirmation the bot automatically delivers login and password.",
+                "description": (
+                    "💠 Product: CapCut Pro (1 month)\n"
+                    "💰 Price: 49,000 UZS ($4.04)\n"
+                    "—————————————————-\n"
+                    "⚙️ How it works\n"
+                    "1. We send you a ready account after purchase\n"
+                    "2. You copy login and password and enter them in CapCut\n"
+                    "3. If you already have an account, log out and log in via “email login”\n"
+                    "⏱ Duration — 30 days\n\n"
+                    "🔐 Security\n"
+                    "— No crashes\n"
+                    "— Only you have access\n"
+                    "— Official connection methods\n\n"
+                    "— Full support during setup 💬\n"
+                    "— Available worldwide\n"
+                    "⸻\n"
+                    "✅ Benefits\n"
+                    "✔️ Fast activation\n"
+                    "✔️ Transparent terms\n"
+                    "✔️ Post-purchase support"
+                ),
             },
         },
     },
