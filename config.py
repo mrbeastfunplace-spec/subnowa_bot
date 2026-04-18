@@ -12,6 +12,7 @@ except ImportError:  # pragma: no cover - optional during compile-only checks
 
 
 BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_PLAYWRIGHT_PROFILE_DIR = "automation/auth_state/chrome_profile"
 
 
 def _load_env() -> None:
@@ -82,24 +83,8 @@ def _resolve_path(value: str) -> Path:
 
 
 def _default_playwright_profile_dir() -> Path:
-    profile_dir_raw = os.getenv("PLAYWRIGHT_PROFILE_DIR", "").strip()
-    if profile_dir_raw:
-        return _resolve_path(profile_dir_raw)
-
-    production_profile_dir = Path("/data/chrome_profile")
-    local_profile_dir = BASE_DIR / "automation" / "auth_state" / "chrome_profile"
-
-    if production_profile_dir.exists():
-        return production_profile_dir
-
-    if any(
-        os.getenv(marker)
-        for marker in ("RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT", "RAILWAY_SERVICE_ID")
-    ):
-        return production_profile_dir
-    if local_profile_dir.exists():
-        return local_profile_dir
-    return local_profile_dir
+    profile_dir_raw = os.getenv("PLAYWRIGHT_PROFILE_DIR", DEFAULT_PLAYWRIGHT_PROFILE_DIR).strip()
+    return Path(profile_dir_raw or DEFAULT_PLAYWRIGHT_PROFILE_DIR)
 
 
 def _default_chatgpt_workspaces(
@@ -149,7 +134,6 @@ def _parse_chatgpt_workspaces(
         name = str(item.get("name") or f"workspace_{index}").strip()
         workspace_id = str(item.get("id") or name).strip() or f"workspace_{index}"
         workspace_url = str(item.get("workspace_url") or item.get("url") or "").strip()
-        profile_dir_raw = str(item.get("profile_dir") or "").strip()
         members_url = str(item.get("members_url") or "").strip() or None
         max_users = _coerce_int(item.get("max_users"), default_max_users, field_name="max_users")
         enabled = _coerce_bool(item.get("enabled", item.get("active")), True)
@@ -160,7 +144,7 @@ def _parse_chatgpt_workspaces(
                 id=workspace_id,
                 name=name,
                 workspace_url=workspace_url,
-                profile_dir=_resolve_path(profile_dir_raw) if profile_dir_raw else default_profile_dir,
+                profile_dir=default_profile_dir,
                 members_url=members_url,
                 max_users=max_users,
                 enabled=enabled,
@@ -184,7 +168,7 @@ class Settings:
     payment_window_hours: int = 12
     chatgpt_workspaces: list[ChatGPTWorkspaceConfig] | None = None
     chatgpt_workspace_member_limit: int = 5
-    playwright_profile_dir: Path = BASE_DIR / "automation" / "auth_state" / "chrome_profile"
+    playwright_profile_dir: Path = Path(DEFAULT_PLAYWRIGHT_PROFILE_DIR)
     playwright_headless: bool = True
     playwright_navigation_timeout_ms: int = 25000
     playwright_action_timeout_ms: int = 12000

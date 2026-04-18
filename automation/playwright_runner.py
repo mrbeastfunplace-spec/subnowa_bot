@@ -219,6 +219,11 @@ async def _run_once(workspace: ChatGPTWorkspaceConfig, email: str, settings: Set
         return _result("unexpected_error", workspace, error_message=f"Playwright is not installed: {exc}")
 
     logger = get_logger("automation.playwright")
+    logger.info(
+        "Using Playwright persistent profile dir | workspace=%s profile_dir=%s",
+        workspace.id,
+        workspace.profile_dir,
+    )
     if not workspace.profile_dir.exists():
         return _result(
             "profile_not_found",
@@ -227,6 +232,11 @@ async def _run_once(workspace: ChatGPTWorkspaceConfig, email: str, settings: Set
         )
 
     async with async_playwright() as playwright:
+        logger.info(
+            "Launching Playwright persistent context | workspace=%s profile_dir=%s",
+            workspace.id,
+            workspace.profile_dir,
+        )
         context = await playwright.chromium.launch_persistent_context(
             str(workspace.profile_dir),
             headless=settings.playwright_headless,

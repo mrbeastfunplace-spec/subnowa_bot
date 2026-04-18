@@ -50,9 +50,7 @@ PLAYWRIGHT_ACTION_TIMEOUT_MS=12000
 PLAYWRIGHT_RETRY_ATTEMPTS=3
 ```
 
-Если `PLAYWRIGHT_PROFILE_DIR` не задан:
-- в Railway / production по умолчанию используется `/data/chrome_profile`
-- локально используется `automation/auth_state/chrome_profile`
+Если `PLAYWRIGHT_PROFILE_DIR` не задан, используется относительный путь `automation/auth_state/chrome_profile`.
 
 ## Как подключить PostgreSQL
 
