@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+*.pyc.*
+.codex_compile/
+automation/auth_state/storage_states/
+automation/auth_state/profiles/

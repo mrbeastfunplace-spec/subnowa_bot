@@ -8,10 +8,11 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from automation.playwright_runner import PlaywrightInviteResult, invite_to_workspace
-from db.base import OrderStatus
+from db.base import ChatGPTWorkspaceStatus, OrderStatus
 from services.context import AppContext
 from services.legacy_ui import build_order_followup_markup, text as ui_text
 from services.orders import change_status, get_order_by_id
+from services.workspace_registry_service import get_workspace_by_code, list_active_workspace_configs, mark_workspace_result
 from services.workspace_router import WorkspaceRouter
 from utils.formatting import order_display_number
 from utils.logger import get_logger
@@ -183,7 +184,8 @@ async def _run_chatgpt_business_order(
                 error_message="Customer email is missing for ChatGPT Business automation",
             )
         else:
-            router = WorkspaceRouter(app.settings.chatgpt_workspaces)
+            workspace_configs = await list_active_workspace_configs(session, app.settings)
+            router = WorkspaceRouter(workspace_configs)
             result: PlaywrightInviteResult | None = None
             if not router.has_workspaces():
                 result = PlaywrightInviteResult(
@@ -256,6 +258,22 @@ async def _run_chatgpt_business_order(
             "finished_at": _isoformat(finished_at),
         }
         _merge_run(order, run_payload)
+
+        registry_workspace = await get_workspace_by_code(session, result.workspace_id or "") if result.workspace_id else None
+        if registry_workspace is not None:
+            target_status = registry_workspace.status
+            if result.status == "auth_failed":
+                target_status = ChatGPTWorkspaceStatus.INVALID_AUTH
+            elif result.status in {"invited", "already_invited", "no_workspace_available"}:
+                target_status = ChatGPTWorkspaceStatus.ACTIVE
+            await mark_workspace_result(
+                session,
+                registry_workspace,
+                status=target_status,
+                current_users_count=result.member_count,
+                error_message=result.error_message,
+            )
+
         await session.commit()
 
         _LOGGER.info(

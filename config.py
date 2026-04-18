@@ -69,10 +69,13 @@ class ChatGPTWorkspaceConfig:
     id: str
     name: str
     workspace_url: str
-    profile_dir: Path
+    profile_dir: Path | None = None
+    storage_state_path: Path | None = None
     members_url: str | None = None
     max_users: int = 5
     enabled: bool = True
+    source: str = "settings"
+    db_id: int | None = None
 
 
 def _resolve_path(value: str) -> Path:
@@ -85,6 +88,28 @@ def _resolve_path(value: str) -> Path:
 def _default_playwright_profile_dir() -> Path:
     profile_dir_raw = os.getenv("PLAYWRIGHT_PROFILE_DIR", DEFAULT_PLAYWRIGHT_PROFILE_DIR).strip()
     return Path(profile_dir_raw or DEFAULT_PLAYWRIGHT_PROFILE_DIR)
+
+
+def _is_railway_runtime() -> bool:
+    return any(os.getenv(key) for key in ("RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT", "RAILWAY_SERVICE_ID"))
+
+
+def _default_playwright_storage_state_dir() -> Path:
+    configured = os.getenv("PLAYWRIGHT_STORAGE_STATE_DIR", "").strip()
+    if configured:
+        return _resolve_path(configured)
+    if _is_railway_runtime():
+        return Path("/data/auth_state")
+    return BASE_DIR / "automation" / "auth_state" / "storage_states"
+
+
+def _default_playwright_onboarding_profile_root() -> Path:
+    configured = os.getenv("PLAYWRIGHT_ONBOARDING_PROFILE_DIR", "").strip()
+    if configured:
+        return _resolve_path(configured)
+    if _is_railway_runtime():
+        return Path("/data/auth_profiles")
+    return BASE_DIR / "automation" / "auth_state" / "profiles"
 
 
 def _default_chatgpt_workspaces(
@@ -100,6 +125,7 @@ def _default_chatgpt_workspaces(
             profile_dir=default_profile_dir,
             max_users=max(1, default_max_users),
             enabled=True,
+            source="settings",
         )
     ]
 
@@ -148,6 +174,7 @@ def _parse_chatgpt_workspaces(
                 members_url=members_url,
                 max_users=max_users,
                 enabled=enabled,
+                source="settings",
             )
         )
     return workspaces
@@ -173,6 +200,9 @@ class Settings:
     playwright_navigation_timeout_ms: int = 25000
     playwright_action_timeout_ms: int = 12000
     playwright_retry_attempts: int = 3
+    playwright_storage_state_dir: Path = Path("automation/auth_state/storage_states")
+    playwright_onboarding_profile_root: Path = Path("automation/auth_state/profiles")
+    playwright_onboarding_timeout_sec: int = 1800
 
     @property
     def polling_lock_path(self) -> Path:
@@ -196,6 +226,8 @@ def load_settings() -> Settings:
 
     chatgpt_workspace_member_limit = int(os.getenv("CHATGPT_WORKSPACE_MEMBER_LIMIT", "5"))
     playwright_profile_dir = _default_playwright_profile_dir()
+    playwright_storage_state_dir = _default_playwright_storage_state_dir()
+    playwright_onboarding_profile_root = _default_playwright_onboarding_profile_root()
 
     return Settings(
         bot_token=bot_token,
@@ -220,4 +252,7 @@ def load_settings() -> Settings:
         playwright_navigation_timeout_ms=int(os.getenv("PLAYWRIGHT_NAVIGATION_TIMEOUT_MS", "25000")),
         playwright_action_timeout_ms=int(os.getenv("PLAYWRIGHT_ACTION_TIMEOUT_MS", "12000")),
         playwright_retry_attempts=int(os.getenv("PLAYWRIGHT_RETRY_ATTEMPTS", "3")),
+        playwright_storage_state_dir=playwright_storage_state_dir,
+        playwright_onboarding_profile_root=playwright_onboarding_profile_root,
+        playwright_onboarding_timeout_sec=int(os.getenv("PLAYWRIGHT_ONBOARDING_TIMEOUT_SEC", "1800")),
     )

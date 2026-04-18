@@ -253,6 +253,7 @@ async def initialize_database(
         await seed_payment_methods(session)
         await seed_texts(session)
         await seed_layouts(session, settings)
+        await ensure_admin_shortcuts(session)
         await sync_legacy_ui_once(session, settings)
         await seed_product_payment_links(session)
         await session.commit()
@@ -484,6 +485,53 @@ async def seed_layouts(session: AsyncSession, settings: Settings, force_codes: s
                 replaceable_default = _REPLACEABLE_LAYOUT_DEFAULTS.get((item["code"], button_data["code"]), {}).get(lang_code)
                 if force_restore or _should_replace_seed_text(translation.text, replaceable_default):
                     translation.text = text
+
+
+async def ensure_admin_shortcuts(session: AsyncSession) -> None:
+    layout = await session.scalar(select(Layout).where(Layout.code == "admin_main"))
+    if layout is None:
+        return
+
+    existing_buttons = {button.code: button for button in layout.buttons}
+    desired_buttons = [
+        {
+            "code": "chatgpt_accounts",
+            "action_value": "admin:chatgpt_accounts",
+            "row_index": 3,
+            "sort_order": 20,
+            "text": "ChatGPT аккаунты",
+        },
+        {
+            "code": "broadcasts",
+            "action_value": "admin:broadcasts",
+            "row_index": 4,
+            "sort_order": 10,
+            "text": "Рассылка",
+        },
+    ]
+
+    for item in desired_buttons:
+        button = existing_buttons.get(item["code"])
+        if button is None:
+            button = LayoutButton(
+                layout=layout,
+                code=item["code"],
+                action_type=ButtonActionType.CALLBACK,
+                action_value=item["action_value"],
+                style="default",
+                row_index=item["row_index"],
+                sort_order=item["sort_order"],
+                is_active=True,
+            )
+            session.add(button)
+            await session.flush()
+        existing_translations = {translation.language.value: translation for translation in button.translations}
+        translation = existing_translations.get(Language.RU.value)
+        if translation is None:
+            translation = LayoutButtonTranslation(button=button, language=Language.RU, text=item["text"])
+            session.add(translation)
+        elif not translation.text:
+            translation.text = item["text"]
 
 
 async def sync_legacy_ui_once(session: AsyncSession, settings: Settings) -> None:

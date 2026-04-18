@@ -6,7 +6,19 @@ from typing import Any
 from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from db.base import Base, ButtonActionType, Language, OrderStatus, PaymentProviderType, ProductStatus, utcnow
+from db.base import (
+    Base,
+    BroadcastButtonType,
+    BroadcastKind,
+    BroadcastStatus,
+    ButtonActionType,
+    ChatGPTWorkspaceStatus,
+    Language,
+    OrderStatus,
+    PaymentProviderType,
+    ProductStatus,
+    utcnow,
+)
 
 
 enum_language = Enum(Language, native_enum=False, length=8)
@@ -14,6 +26,10 @@ enum_order_status = Enum(OrderStatus, native_enum=False, length=32)
 enum_payment_type = Enum(PaymentProviderType, native_enum=False, length=16)
 enum_button_action = Enum(ButtonActionType, native_enum=False, length=16)
 enum_product_status = Enum(ProductStatus, native_enum=False, length=16)
+enum_workspace_status = Enum(ChatGPTWorkspaceStatus, native_enum=False, length=32)
+enum_broadcast_kind = Enum(BroadcastKind, native_enum=False, length=16)
+enum_broadcast_button_type = Enum(BroadcastButtonType, native_enum=False, length=32)
+enum_broadcast_status = Enum(BroadcastStatus, native_enum=False, length=16)
 
 
 class User(Base):
@@ -221,6 +237,48 @@ class Setting(Base):
     value_type: Mapped[str] = mapped_column(String(32), default="string")
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class ChatGPTWorkspace(Base):
+    __tablename__ = "chatgpt_workspaces"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    workspace_name: Mapped[str] = mapped_column(String(255), default="")
+    label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workspace_url: Mapped[str] = mapped_column(Text, default="https://chatgpt.com/")
+    members_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storage_state_path: Mapped[str] = mapped_column(Text, default="")
+    temp_profile_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[ChatGPTWorkspaceStatus] = mapped_column(enum_workspace_status, default=ChatGPTWorkspaceStatus.PENDING_SETUP, index=True)
+    max_users: Mapped[int] = mapped_column(Integer, default=5)
+    current_users_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_checked_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_admin_telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class Broadcast(Base):
+    __tablename__ = "broadcasts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    broadcast_type: Mapped[BroadcastKind] = mapped_column(enum_broadcast_kind)
+    message_text: Mapped[str] = mapped_column(Text, default="")
+    photo_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    button_type: Mapped[BroadcastButtonType] = mapped_column(enum_broadcast_button_type, default=BroadcastButtonType.NONE)
+    button_text: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    button_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_admin_telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+    sent_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    total_recipients: Mapped[int] = mapped_column(Integer, default=0)
+    success_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[BroadcastStatus] = mapped_column(enum_broadcast_status, default=BroadcastStatus.DRAFT, index=True)
 
 
 class Order(Base):

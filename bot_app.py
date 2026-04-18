@@ -13,6 +13,8 @@ from config import load_settings
 from db.bootstrap import initialize_database
 from db.session import create_engine_and_session
 from handlers import build_catalog_router, build_profile_router, build_start_router
+from handlers.admin_broadcast import build_admin_broadcast_router
+from handlers.admin_workspace import build_admin_workspace_router
 from services.capcut import run_capcut_cleanup_loop
 from services.context import AppContext
 from utils.polling_lock import PollingLock
@@ -37,6 +39,8 @@ async def main() -> None:
     cleanup_task = asyncio.create_task(run_capcut_cleanup_loop(session_factory))
 
     dp.include_router(build_admin_router(app, bot))
+    dp.include_router(build_admin_workspace_router(app, bot))
+    dp.include_router(build_admin_broadcast_router(app, bot))
     dp.include_router(build_catalog_router(app, bot))
     dp.include_router(build_profile_router(app))
     dp.include_router(build_start_router(app, bot))

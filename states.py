@@ -33,3 +33,11 @@ class AdminState(StatesGroup):
     waiting_payment_photo = State()
     waiting_stock_single = State()
     waiting_stock_bulk = State()
+
+
+class AdminBroadcastState(StatesGroup):
+    waiting_text = State()
+    waiting_photo = State()
+    waiting_caption = State()
+    waiting_button_text = State()
+    waiting_button_url = State()

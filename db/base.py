@@ -47,3 +47,28 @@ class PaymentProviderType(str, Enum):
 class ButtonActionType(str, Enum):
     CALLBACK = "callback"
     URL = "url"
+
+
+class ChatGPTWorkspaceStatus(str, Enum):
+    PENDING_SETUP = "pending_setup"
+    ACTIVE = "active"
+    INVALID_AUTH = "invalid_auth"
+    DISABLED = "disabled"
+
+
+class BroadcastKind(str, Enum):
+    TEXT = "text"
+    PHOTO = "photo"
+
+
+class BroadcastButtonType(str, Enum):
+    NONE = "none"
+    URL = "url"
+    INTERNAL_ACTION = "internal_action"
+
+
+class BroadcastStatus(str, Enum):
+    DRAFT = "draft"
+    SENT = "sent"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
