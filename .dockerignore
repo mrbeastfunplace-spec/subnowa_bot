@@ -1,0 +1,12 @@
+.git
+.gitignore.txt
+.env
+.polling.lock
+bot.db
+aaaa.txt
+python
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
