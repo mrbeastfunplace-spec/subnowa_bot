@@ -15,10 +15,16 @@ from db.session import create_engine_and_session
 from handlers import build_catalog_router, build_profile_router, build_start_router
 from services.capcut import run_capcut_cleanup_loop
 from services.context import AppContext
+from utils.polling_lock import PollingLock
 
 
 async def main() -> None:
     settings = load_settings()
+    polling_lock = PollingLock(settings.polling_lock_path)
+    if not polling_lock.acquire():
+        print("Bot start blocked: another local bot instance is already running.")
+        return
+
     engine, session_factory = create_engine_and_session(settings.database_url)
     await initialize_database(engine, session_factory, settings)
 
@@ -45,6 +51,7 @@ async def main() -> None:
             await cleanup_task
         await bot.session.close()
         await engine.dispose()
+        polling_lock.release()
 
 
 def run() -> None:
