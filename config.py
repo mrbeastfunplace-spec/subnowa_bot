@@ -85,7 +85,21 @@ def _default_playwright_profile_dir() -> Path:
     profile_dir_raw = os.getenv("PLAYWRIGHT_PROFILE_DIR", "").strip()
     if profile_dir_raw:
         return _resolve_path(profile_dir_raw)
-    return BASE_DIR / "automation" / "auth_state" / "chrome_profile"
+
+    production_profile_dir = Path("/data/chrome_profile")
+    local_profile_dir = BASE_DIR / "automation" / "auth_state" / "chrome_profile"
+
+    if production_profile_dir.exists():
+        return production_profile_dir
+
+    if any(
+        os.getenv(marker)
+        for marker in ("RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT", "RAILWAY_SERVICE_ID")
+    ):
+        return production_profile_dir
+    if local_profile_dir.exists():
+        return local_profile_dir
+    return local_profile_dir
 
 
 def _default_chatgpt_workspaces(
