@@ -74,7 +74,7 @@ PRICE_HINTS = {
         "chatgpt_menu_text": "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT Plus/Pro\n\nTarifni tanlang 👇",
         "capcut_menu_text": "<tg-emoji emoji-id='5364339557712020484'>🎬</tg-emoji> CapCut Pro\n\nTarifni tanlang 👇",
         "chatgpt_1m_text": "💠 ChatGPT PLUS (1 oy)\n💰 Narx: {price_uzs} so‘m\n────────────────\n⚙️ Ulanish tartibi\n1. Gmail'ingizga maxsus PLUS taklif havolasini yuboramiz\n2. Havolaga o‘tib, o‘zingizning akkauntingizga kirasiz\n3. ChatGPT PLUS avtomatik faollashadi\n⏱ Amal qilish muddati — faollashtirilganidan keyin 25-30 kun\n\n🔐 Xavfsizlik\n— Parol berilmaydi\n— Tizimga faqat siz o‘zingiz kirasiz\n— Faqat rasmiy ulash usullaridan foydalaniladi\n\n✅ Afzalliklar\n✔️ Tez ulash\n✔️ Shaffof shartlar\n✔️ Xariddan keyin ham yordam",
-        "capcut_1m_text": "💠 Mahsulot: CapCut Pro (1 oy)\n💰 Narxi: {price_uzs} so‘m (~350 ₽)\n—————————————————-\n⚙️ Qanday ulanadi\n 1. Buyurtmadan so‘ng sizga tayyor akkaunt yuboriladi\n 2. Siz ushbu ma’lumotlarni (login, parol) nusxalab CapCut ga kiritasiz\n 3. Agar sizda akkaunt bo‘lsa, avval undan chiqib, &lt;&gt; usuli bilan qayta kiring\n⏱ Faol muddati — faollashtirilgan vaqtdan boshlab 30 kun\n\n🔐 Xavfsizlik\n— Uzilishlarsiz\n— Kirish faqat siz tomonidan amalga oshiriladi\n— Rasmiy ulanish usullari ishlatiladi\n\n— Ulanishning barcha bosqichlarida yordam 💬\n— MDH va boshqa davlatlar foydalanuvchilari uchun mavjud\n⸻\n✅ Afzalliklar\n✔️ Tez ulanish\n✔️ Shaffof shartlar\n✔️ Xariddan keyingi yordam",
+        "capcut_1m_text": "CapCut Pro (1 oy)\nNarx: {price_uzs} so‘m\n\n<blockquote>Qanday ulanadi:\n1. To‘lov tasdiqlangach tayyor akkaunt beriladi.\n2. Siz email orqali kirasiz.\n3. Agar boshqa akkaunt ochiq bo‘lsa, avval undan chiqing.\n</blockquote>\n\nAmal qilish muddati — 30 kun.",
         "invoice_title": "Buyurtma: {order_number}\nMahsulot: {product_name}\nNarx: {price_uzs} so‘m{usd_part}\n\nHisob 30 daqiqa amal qiladi.\nHolat to‘lovdan keyin yangilanadi.",
         "pay_click_text": "Buyurtma: {order_number}\nMahsulot: {product_name}\nNarx: {price_uzs} so‘m\n\nTo‘lov uchun:\n1. Click ni oching\n2. QR kodni skaner qiling\n3. {price_uzs} so‘m summani kiriting\n4. To‘lovni tasdiqlang\n\nTo‘lovdan keyin chekni shu botga yuboring.",
         "pay_card_text": "Buyurtma: {order_number}\nMahsulot: {product_name}\nNarx: {price_uzs} so‘m\n\nRekvizitlar:\n{card_number}\n\nSummani kiriting: {price_uzs} so‘m\n\nTo‘lovdan keyin chekni shu botga yuboring.",
@@ -131,7 +131,7 @@ PRICE_HINTS = {
         "chatgpt_menu_text": "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT Plus/Pro\n\nChoose a tariff below 👇",
         "capcut_menu_text": "<tg-emoji emoji-id='5364339557712020484'>🎬</tg-emoji> CapCut Pro\n\nChoose a tariff below 👇",
         "chatgpt_1m_text": "💠 ChatGPT PLUS (1 month)\n💰 Price: {price_uzs} UZS\n────────────────\n⚙️ How activation works\n1. We send a special PLUS invitation link to your Gmail\n2. You open the link and sign in to your own account\n3. ChatGPT PLUS activates automatically\n⏱ Duration: 25-30 days after activation\n\n🔐 Security\n— No password transfer\n— Only you sign in to the account\n— Official activation methods only\n\n✅ Benefits\n✔️ Fast activation\n✔️ Clear terms\n✔️ Support after purchase",
-        "capcut_1m_text": "💠 Product: CapCut Pro (1 month)\n💰 Price: {price_uzs} UZS (~350 ₽)\n—————————————————-\n⚙️ How connection works\n 1. We send you a ready account created after the order\n 2. You copy these details (login, password) and paste them into CapCut\n 3. If you already have an account, first log out and then sign in using\n&lt;&gt;\n⏱ Duration — 30 days from activation\n\n🔐 Security\n— No crashes\n— Only you can access it\n— Official connection methods are used\n\n— Support at every connection step 💬\n— Available for users from CIS and other countries\n⸻\n✅ Advantages\n✔️ Fast connection\n✔️ Transparent terms\n✔️ Support after purchase",
+        "capcut_1m_text": "CapCut Pro (1 month)\nPrice: {price_uzs} UZS\n\n<blockquote>How activation works:\n1. We provide a ready account after payment confirmation.\n2. You sign in with the email.\n3. If another CapCut account is already open, sign out first.\n</blockquote>\n\nDuration: 30 days.",
         "invoice_title": "Order: {order_number}\nProduct: {product_name}\nPrice: {price_uzs} UZS{usd_part}\n\nThe invoice is valid for 30 minutes.\nStatus will update after payment.",
         "pay_click_text": "Order: {order_number}\nProduct: {product_name}\nPrice: {price_uzs} UZS\n\nTo pay:\n1. Open Click\n2. Scan the QR code\n3. Enter the amount {price_uzs} UZS\n4. Confirm the payment\n\nAfter payment, send the receipt to this bot.",
         "pay_card_text": "Order: {order_number}\nProduct: {product_name}\nPrice: {price_uzs} UZS\n\nCard details:\n{card_number}\n\nEnter the amount: {price_uzs} UZS\n\nAfter payment, send the receipt to this bot.",
@@ -233,26 +233,15 @@ TEXTS = {
             "✔️ Сопровождение после покупки"
         ),
         "capcut_1m_text": (
-            "💠 Товар: CapCut Pro (1 месяц)\n"
-            "💰 Стоимость: {price_uzs} сум (~350 ₽)\n"
-            "—————————————————-\n"
-            "⚙️ Как проходит подключение\n"
-            " 1. Мы отправляем вам готовый аккаунт который создается после заказа\n"
-            " 2. Вы скопируете эти данные ввиде(login,parol) и вставляете capcut\n"
-            " 3. если у вас есть аккаунт то сначала вам нужно выйти и зайти способом\n"
-            "&lt;&lt;войти через почту&gt;&gt;\n"
-            "⏱ Срок действия — 30 дней с момента активации\n\n"
-            "🔐 Безопасность\n"
-            "— Без вылетов\n"
-            "— Вход осуществляется только вами\n"
-            "— Используются официальные методы подключения\n\n"
-            "— Поддержка на всех этапах подключения 💬\n"
-            "— Доступно для пользователей из СНГ и других стран\n"
-            "⸻\n"
-            "✅ Преимущества\n"
-            "✔️ Быстрое подключение\n"
-            "✔️ Прозрачные условия\n"
-            "✔️ Сопровождение после покупки"
+            "CapCut Pro (1 месяц)\n"
+            "Цена: {price_uzs} сум (~350 ₽)\n\n"
+            "<blockquote>"
+            "Как проходит подключение:\n"
+            "1. Мы выдаём готовый аккаунт после ✅ подтверждения оплаты.\n"
+            "2. Вы входите через почту.\n"
+            "3. Если у вас уже есть аккаунт, сначала выйдите из него.\n"
+            "</blockquote>\n\n"
+            "Срок действия — 30 дней."
         ),
         "invoice_title": (
             "Заказ: {order_number}\n"
@@ -349,7 +338,7 @@ TEXTS = {
         "chatgpt_menu_text": "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT Plus/Pro\n\nChoose a tariff below 👇",
         "capcut_menu_text": "<tg-emoji emoji-id='5364339557712020484'>🎬</tg-emoji> CapCut Pro\n\nChoose a tariff below 👇",
         "chatgpt_1m_text": "💠 ChatGPT PLUS (1 month)\n💰 Price: {price_uzs} UZS\n────────────────\n⚙️ How activation works\n1. We send a special PLUS invitation link to your Gmail\n2. You open the link and sign in to your own account\n3. ChatGPT PLUS activates automatically\n⏱ Duration: 25-30 days after activation\n\n🔐 Security\n— No password transfer\n— Only you sign in to the account\n— Official activation methods only\n\n✅ Benefits\n✔️ Fast activation\n✔️ Clear terms\n✔️ Support after purchase",
-        "capcut_1m_text": "💠 Product: CapCut Pro (1 month)\n💰 Price: {price_uzs} UZS (~350 ₽)\n—————————————————-\n⚙️ How connection works\n 1. We send you a ready account created after the order\n 2. You copy these details (login, password) and paste them into CapCut\n 3. If you already have an account, first log out and then sign in using\n&lt;&gt;\n⏱ Duration — 30 days from activation\n\n🔐 Security\n— No crashes\n— Only you can access it\n— Official connection methods are used\n\n— Support at every connection step 💬\n— Available for users from CIS and other countries\n⸻\n✅ Advantages\n✔️ Fast connection\n✔️ Transparent terms\n✔️ Support after purchase",
+        "capcut_1m_text": "CapCut Pro (1 month)\nPrice: {price_uzs} UZS\n\n<blockquote>How activation works:\n1. We provide a ready account after payment confirmation.\n2. You sign in with the email.\n3. If another CapCut account is already open, sign out first.\n</blockquote>\n\nDuration: 30 days.",
         "invoice_title": "Order: {order_number}\nProduct: {product_name}\nPrice: {price_uzs} UZS{usd_part}\n\nThe invoice is valid for 30 minutes.\nStatus will update after payment.",
         "pay_click_text": "Order: {order_number}\nProduct: {product_name}\nPrice: {price_uzs} UZS\n\nTo pay:\n1. Open Click\n2. Scan the QR code\n3. Enter the amount {price_uzs} UZS\n4. Confirm the payment\n\nAfter payment, send the receipt to this bot.",
         "pay_card_text": "Order: {order_number}\nProduct: {product_name}\nPrice: {price_uzs} UZS\n\nCard details:\n{card_number}\n\nEnter the amount: {price_uzs} UZS\n\nAfter payment, send the receipt to this bot.",
@@ -382,6 +371,231 @@ TEXTS = {
         "multi_capcut_service": "CapCut Pro",
     },
 }
+
+
+for language_code, title_updates in {
+    "ru": {
+        "capcut_pro_month": "CapCut Pro — Готовый аккаунт",
+        "capcut_personal_month": "CapCut Pro — Личный аккаунт",
+    },
+    "uz": {
+        "capcut_pro_month": "CapCut Pro — Tayyor akkaunt",
+        "capcut_personal_month": "CapCut Pro — Shaxsiy akkaunt",
+    },
+    "en": {
+        "capcut_pro_month": "CapCut Pro — Ready account",
+        "capcut_personal_month": "CapCut Pro — Personal account",
+    },
+}.items():
+    PRODUCT_TITLES.setdefault(language_code, {}).update(title_updates)
+
+for language_code, values in {
+    "ru": {
+        "invalid_email": "Введите корректный email.",
+        "capcut_menu_text": (
+            "🎬 Выберите подходящий вариант CapCut Pro на 30 дней:\n\n"
+            "🔹 Личный аккаунт — для тех, кому важны стабильность, гарантия и поддержка.\n"
+            "🔹 Готовый аккаунт — более доступный вариант по цене, но без гарантии срока действия.\n\n"
+            "Нажмите на нужный вариант ниже, чтобы посмотреть подробности."
+        ),
+        "capcut_personal_text": (
+            "👤 CapCut Pro — Личный аккаунт\n"
+            "💰 Цена: {price_uzs} сум\n"
+            "📅 Срок доступа: 30 дней\n\n"
+            "Что вы получаете:\n"
+            "✅ Отдельный аккаунт для личного использования\n"
+            "✅ Доступ передаётся в формате логин / пароль\n"
+            "✅ Стабильная работа на весь оплаченный период\n"
+            "✅ Гарантия 30 дней\n"
+            "✅ Техническая поддержка 24/7\n"
+            "✅ Подходит для постоянной и спокойной работы без лишних рисков\n\n"
+            "Этот вариант подойдёт тем, кто хочет надёжный доступ без неприятных сюрпризов и ценит поддержку на всём протяжении использования."
+        ),
+        "capcut_ready_text": (
+            "📦 CapCut Pro — Готовый аккаунт\n"
+            "💰 Цена: {price_uzs} сум\n"
+            "📅 Ориентировочный срок доступа: до 30 дней\n\n"
+            "Что важно знать:\n"
+            "✅ Более доступная цена\n"
+            "✅ Аккаунт выдаётся автоматически\n"
+            "✅ Подходит, если нужен быстрый и недорогой доступ\n\n"
+            "Условия:\n"
+            "⚠️ На этот вариант не распространяется гарантия\n"
+            "⚠️ Подписка может завершиться раньше 30 дней\n"
+            "⚠️ В некоторых случаях доступ может сохраниться и дольше 30 дней\n"
+            "⚠️ Этот тариф подойдёт тем, кому в первую очередь важна экономия\n\n"
+            "Пожалуйста, оформляйте этот вариант только если понимаете его особенности."
+        ),
+        "chatgpt_business_processing": (
+            "✅ Оплата получена!\n\n"
+            "⏳ Мы уже обрабатываем ваш заказ и подготавливаем доступ.\n"
+            "Пожалуйста, подождите немного."
+        ),
+        "chatgpt_business_invited": (
+            "🎉 Готово! Ваш доступ успешно оформлен.\n\n"
+            "📩 Приглашение уже отправлено на указанный вами email.\n"
+            "Пожалуйста, откройте почту и примите приглашение.\n\n"
+            "Если письма нет во входящих, обязательно проверьте папку «Спам»."
+        ),
+        "chatgpt_business_already_invited": (
+            "ℹ️ Похоже, приглашение на этот email уже было отправлено ранее.\n\n"
+            "Пожалуйста, проверьте свою почту и примите приглашение.\n"
+            "Если письма нет во входящих, проверьте папку «Спам»."
+        ),
+        "chatgpt_business_waiting": (
+            "⏳ Сейчас все доступные места заняты.\n\n"
+            "Ваш заказ поставлен в очередь.\n"
+            "Как только освободится место или станет доступен следующий workspace, мы продолжим подключение."
+        ),
+        "chatgpt_business_failed": (
+            "❌ Во время обработки заказа произошла ошибка.\n\n"
+            "Пожалуйста, свяжитесь с поддержкой, и мы поможем решить вопрос как можно быстрее."
+        ),
+        "btn_capcut_personal": "Личный аккаунт",
+        "btn_capcut_ready": "Готовый аккаунт",
+        "btn_buy_now": "Купить",
+        "btn_order_details": "Детали заказа",
+        "btn_contact_support": "Связаться с поддержкой",
+        "btn_leave_review": "Оставить отзыв",
+    },
+    "uz": {
+        "invalid_email": "To'g'ri email kiriting.",
+        "capcut_menu_text": (
+            "🎬 30 kunlik CapCut Pro uchun mos variantni tanlang:\n\n"
+            "🔹 Shaxsiy akkaunt — barqarorlik, kafolat va yordam muhim bo'lsa.\n"
+            "🔹 Tayyor akkaunt — arzonroq, lekin amal qilish muddati kafolatsiz.\n\n"
+            "Batafsil ma'lumotni ko'rish uchun quyidagi variantlardan birini bosing."
+        ),
+        "capcut_personal_text": (
+            "👤 CapCut Pro — Shaxsiy akkaunt\n"
+            "💰 Narx: {price_uzs} so'm\n"
+            "📅 Foydalanish muddati: 30 kun\n\n"
+            "Siz nima olasiz:\n"
+            "✅ Faqat siz uchun alohida akkaunt\n"
+            "✅ Kirish login / parol ko'rinishida beriladi\n"
+            "✅ To'liq davr uchun barqaror ishlash\n"
+            "✅ 30 kunlik kafolat\n"
+            "✅ 24/7 texnik yordam\n"
+            "✅ Doimiy va xotirjam ishlash uchun mos variant\n\n"
+            "Bu variant ishonchli kirish va butun foydalanish davrida yordamni qadrlaydiganlar uchun mos."
+        ),
+        "capcut_ready_text": (
+            "📦 CapCut Pro — Tayyor akkaunt\n"
+            "💰 Narx: {price_uzs} so'm\n"
+            "📅 Taxminiy foydalanish muddati: 30 kungacha\n\n"
+            "Muhim ma'lumotlar:\n"
+            "✅ Narxi arzonroq\n"
+            "✅ Akkaunt avtomatik beriladi\n"
+            "✅ Tez va tejamkor kirish kerak bo'lsa mos\n\n"
+            "Shartlar:\n"
+            "⚠️ Bu variantga kafolat berilmaydi\n"
+            "⚠️ Obuna 30 kundan oldin tugashi mumkin\n"
+            "⚠️ Ayrim holatlarda kirish 30 kundan ham uzoq ishlashi mumkin\n"
+            "⚠️ Bu tarif tejamkorlikni birinchi o'ringa qo'yadiganlar uchun mos\n\n"
+            "Iltimos, ushbu variantni uning xususiyatlarini tushungan holda rasmiylashtiring."
+        ),
+        "chatgpt_business_processing": (
+            "✅ To'lov qabul qilindi!\n\n"
+            "⏳ Buyurtmangizni allaqachon qayta ishlayapmiz va kirishni tayyorlayapmiz.\n"
+            "Iltimos, biroz kuting."
+        ),
+        "chatgpt_business_invited": (
+            "🎉 Tayyor! Sizning kirishingiz muvaffaqiyatli rasmiylashtirildi.\n\n"
+            "📩 Taklif ko'rsatilgan emailingizga yuborildi.\n"
+            "Iltimos, pochtani ochib taklifni qabul qiling.\n\n"
+            "Agar xat kiruvchi papkada bo'lmasa, albatta Spam papkasini tekshiring."
+        ),
+        "chatgpt_business_already_invited": (
+            "ℹ️ Bu emailga taklif avvalroq yuborilganga o'xshaydi.\n\n"
+            "Iltimos, pochtangizni tekshirib taklifni qabul qiling.\n"
+            "Agar xat kiruvchi papkada bo'lmasa, Spam papkasini tekshiring."
+        ),
+        "chatgpt_business_waiting": (
+            "⏳ Hozir barcha bo'sh joylar band.\n\n"
+            "Buyurtmangiz navbatga qo'yildi.\n"
+            "Bo'sh joy ochilishi yoki keyingi workspace tayyor bo'lishi bilan ulanishni davom ettiramiz."
+        ),
+        "chatgpt_business_failed": (
+            "❌ Buyurtmani qayta ishlash vaqtida xatolik yuz berdi.\n\n"
+            "Iltimos, yordam bilan bog'laning, biz masalani imkon qadar tez hal qilishga yordam beramiz."
+        ),
+        "btn_capcut_personal": "Shaxsiy akkaunt",
+        "btn_capcut_ready": "Tayyor akkaunt",
+        "btn_buy_now": "Sotib olish",
+        "btn_order_details": "Buyurtma tafsilotlari",
+        "btn_contact_support": "Yordam bilan bog'lanish",
+        "btn_leave_review": "Fikr qoldirish",
+    },
+    "en": {
+        "invalid_email": "Enter a valid email address.",
+        "capcut_menu_text": (
+            "🎬 Choose the right CapCut Pro option for 30 days:\n\n"
+            "🔹 Personal account — for users who value stability, guarantee, and support.\n"
+            "🔹 Ready account — a more affordable option, but without a duration guarantee.\n\n"
+            "Tap one of the options below to view the details."
+        ),
+        "capcut_personal_text": (
+            "👤 CapCut Pro — Personal account\n"
+            "💰 Price: {price_uzs} UZS\n"
+            "📅 Access period: 30 days\n\n"
+            "What you get:\n"
+            "✅ A separate account for personal use\n"
+            "✅ Access delivered as login / password\n"
+            "✅ Stable work during the paid period\n"
+            "✅ 30-day guarantee\n"
+            "✅ 24/7 technical support\n"
+            "✅ Suitable for steady work without unnecessary risks\n\n"
+            "This option is best for users who want reliable access without unpleasant surprises and value support throughout the whole period."
+        ),
+        "capcut_ready_text": (
+            "📦 CapCut Pro — Ready account\n"
+            "💰 Price: {price_uzs} UZS\n"
+            "📅 Estimated access period: up to 30 days\n\n"
+            "Important details:\n"
+            "✅ Lower price\n"
+            "✅ Account is issued automatically\n"
+            "✅ Good if you need quick and affordable access\n\n"
+            "Conditions:\n"
+            "⚠️ This option does not include a guarantee\n"
+            "⚠️ The subscription may end earlier than 30 days\n"
+            "⚠️ In some cases access may remain active longer than 30 days\n"
+            "⚠️ This plan is mainly for users who prioritize savings\n\n"
+            "Please place this order only if you understand how this option works."
+        ),
+        "chatgpt_business_processing": (
+            "✅ Payment received!\n\n"
+            "⏳ We are already processing your order and preparing your access.\n"
+            "Please wait a little."
+        ),
+        "chatgpt_business_invited": (
+            "🎉 Done! Your access has been prepared successfully.\n\n"
+            "📩 An invitation has already been sent to the email address you provided.\n"
+            "Please open your inbox and accept the invitation.\n\n"
+            "If you do not see the email, be sure to check your Spam folder."
+        ),
+        "chatgpt_business_already_invited": (
+            "ℹ️ It looks like an invitation has already been sent to this email.\n\n"
+            "Please check your inbox and accept the invitation.\n"
+            "If the email is not in Inbox, check your Spam folder."
+        ),
+        "chatgpt_business_waiting": (
+            "⏳ All available seats are currently occupied.\n\n"
+            "Your order has been placed in queue.\n"
+            "As soon as a seat is free or the next workspace becomes available, we will continue the connection."
+        ),
+        "chatgpt_business_failed": (
+            "❌ An error occurred while processing your order.\n\n"
+            "Please contact support and we will help resolve the issue as quickly as possible."
+        ),
+        "btn_capcut_personal": "Personal account",
+        "btn_capcut_ready": "Ready account",
+        "btn_buy_now": "Buy",
+        "btn_order_details": "Order details",
+        "btn_contact_support": "Contact support",
+        "btn_leave_review": "Leave a review",
+    },
+}.items():
+    TEXTS.setdefault(language_code, {}).update(values)
 
 
 def _language(language: str | None) -> str:
@@ -566,49 +780,6 @@ def build_details_markup(language: str | None, product_key: str) -> InlineKeyboa
     )
 
 
-def _capcut_payment_label(language: str | None) -> str:
-    language = _language(language)
-    if language == "uz":
-        return "To‘lovga o‘tish"
-    if language == "en":
-        return "Proceed to payment"
-    return "Перейти к оплате"
-
-
-def _capcut_cancel_label(language: str | None) -> str:
-    language = _language(language)
-    if language == "uz":
-        return "Buyurtmani bekor qilish"
-    if language == "en":
-        return "Cancel order"
-    return "Отменить заказ"
-
-
-def _capcut_support_label(language: str | None) -> str:
-    language = _language(language)
-    if language == "uz":
-        return "Texnik yordam"
-    if language == "en":
-        return "Support"
-    return "Техподдержка"
-
-
-def build_capcut_details_markup(
-    language: str | None,
-    support_url: str,
-    order_id: int,
-    payment_url: str,
-) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=_capcut_payment_label(language), url=payment_url, style="success")],
-            [InlineKeyboardButton(text=_capcut_cancel_label(language), callback_data=f"order:cancel:{order_id}", style="danger")],
-            [InlineKeyboardButton(text=text(language, "btn_menu"), callback_data="menu:main")],
-            [InlineKeyboardButton(text=_capcut_support_label(language), url=support_url)],
-        ]
-    )
-
-
 def build_subscription_check_markup(language: str | None, channel_name: str, callback_data: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -670,3 +841,54 @@ def build_stock_empty_markup(language: str | None, support_url: str) -> InlineKe
             [InlineKeyboardButton(text=text(language, "btn_question"), url=support_url)],
         ]
     )
+
+
+def build_capcut_selector_markup(language: str | None) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=text(language, "btn_capcut_personal"), callback_data="capcut_personal")],
+            [InlineKeyboardButton(text=text(language, "btn_capcut_ready"), callback_data="capcut_ready")],
+            [
+                InlineKeyboardButton(text=text(language, "btn_back"), callback_data="open_subscriptions", style="danger"),
+                InlineKeyboardButton(text=text(language, "btn_menu"), callback_data="menu:main"),
+            ],
+        ]
+    )
+
+
+def build_capcut_details_markup(language: str | None, product_key: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=text(language, "btn_buy_now"), callback_data=f"buy_{product_key}", style="success")],
+            [
+                InlineKeyboardButton(text=text(language, "btn_back"), callback_data=f"back_to_{product_key}", style="danger"),
+                InlineKeyboardButton(text=text(language, "btn_menu"), callback_data="menu:main"),
+            ],
+        ]
+    )
+
+
+def capcut_personal_text(language: str | None, price_uzs: Decimal | str | int | float) -> str:
+    return text(language, "capcut_personal_text", price_uzs=format_price_uzs(price_uzs))
+
+
+def capcut_ready_text(language: str | None, price_uzs: Decimal | str | int | float) -> str:
+    return text(language, "capcut_ready_text", price_uzs=format_price_uzs(price_uzs))
+
+
+def build_order_followup_markup(
+    language: str | None,
+    order_id: int,
+    support_url: str,
+    review_url: str,
+    *,
+    include_review: bool,
+) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=text(language, "btn_order_details"), callback_data=f"order:detail:{order_id}")],
+        [InlineKeyboardButton(text=text(language, "btn_contact_support"), url=support_url)],
+    ]
+    if include_review:
+        rows.append([InlineKeyboardButton(text=text(language, "btn_leave_review"), url=review_url)])
+    rows.append([InlineKeyboardButton(text=text(language, "btn_menu"), callback_data="menu:main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

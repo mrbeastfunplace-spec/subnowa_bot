@@ -31,247 +31,6 @@ from db.models import (
 _CATEGORY_SLUG_MAX_LENGTH = 64
 _LEGACY_UI_SYNC_SETTING_KEY = "system.legacy_ui_sync_version"
 _LEGACY_UI_SYNC_VERSION = "2026-04-11-legacy-ui-v2"
-_MULTICARD_TEXT_SYNC_SETTING_KEY = "system.multicard_checkout_sync_version"
-_MULTICARD_TEXT_SYNC_VERSION = "2026-04-14-multicard-checkout-v1"
-_TELEGRAM_PAYMENT_SYNC_SETTING_KEY = "system.telegram_payment_sync_version"
-_TELEGRAM_PAYMENT_SYNC_VERSION = "2026-04-14-telegram-payments-v1"
-_PRODUCT_COPY_SYNC_SETTING_KEY = "system.product_copy_sync_version"
-_PRODUCT_COPY_SYNC_VERSION = "2026-04-15-capcut-copy-v2"
-_MULTICARD_TEXT_OVERRIDES: dict[str, dict[str, str]] = {
-    "user.faq_body": {
-        "ru": (
-            "1. Что я получу после оплаты?\n"
-            "Вы получите подтверждение заказа и дальнейшие инструкции по подключению.\n\n"
-            "2. Как подключается ChatGPT Plus?\n"
-            "Мы отправляем приглашение на ваш Gmail, после принятия подписка активируется.\n\n"
-            "3. Как подключается CapCut Pro?\n"
-            "После подтверждения оплаты вы получаете готовые данные для входа.\n\n"
-            "4. Сколько времени занимает подключение?\n"
-            "Обычно от нескольких минут до нескольких часов, в зависимости от очереди.\n\n"
-            "5. Как проходит оплата?\n"
-            "Оплата открывается на защищённой checkout-странице Multicard. После оплаты статус заказа обновляется автоматически.\n\n"
-            "6. Нужен ли VPN для использования?\n"
-            "В большинстве случаев нет.\n\n"
-            "7. Можно ли заказать несколько аккаунтов?\n"
-            "Да, используйте кнопку «Хочу несколько», и администратор обработает заявку.\n\n"
-            "8. Что делать, если письмо не пришло?\n"
-            "Проверьте папки «Спам» и «Промоакции», затем напишите в поддержку.\n\n"
-            "9. Можно ли заказать другой сервис?\n"
-            "Да, в разделе «Другое» можно оставить заявку на нужную подписку.\n\n"
-            "10. Что делать, если возникла проблема после покупки?\n"
-            "Напишите в поддержку, указав номер заказа и суть проблемы."
-        ),
-        "uz": (
-            "1. To‘lovdan keyin nima olaman?\n"
-            "Buyurtma tasdig‘i va ulash bo‘yicha ko‘rsatmalar olasiz.\n\n"
-            "2. ChatGPT Plus qanday ulanadi?\n"
-            "Gmail'ingizga yuborilgan havolani tasdiqlaysiz va obuna faollashadi.\n\n"
-            "3. CapCut Pro qanday beriladi?\n"
-            "To‘lov tasdiqlangach, tayyor login va parol yuboriladi.\n\n"
-            "4. Ulanish qancha vaqt oladi?\n"
-            "Odatda bir necha daqiqadan bir necha soatgacha.\n\n"
-            "5. To‘lov qanday amalga oshadi?\n"
-            "To‘lov Multicard himoyalangan checkout sahifasida ochiladi. To‘lovdan keyin buyurtma holati avtomatik yangilanadi.\n\n"
-            "6. VPN kerakmi?\n"
-            "Ko‘p hollarda yo‘q.\n\n"
-            "7. Bir nechta akkaunt buyurtma qilish mumkinmi?\n"
-            "Ha, «Bir nechta kerak» tugmasi orqali so‘rov yuboring.\n\n"
-            "8. Xat kelmasa nima qilaman?\n"
-            "Spam va Promotions papkalarini tekshiring, keyin yordamga yozing.\n\n"
-            "9. Boshqa xizmat buyurtma qilish mumkinmi?\n"
-            "Ha, «Boshqa» bo‘limida so‘rov qoldiring.\n\n"
-            "10. Xariddan keyin muammo bo‘lsa nima qilaman?\n"
-            "Buyurtma raqami bilan yordam xizmatiga yozing."
-        ),
-        "en": (
-            "1. What do I receive after payment?\n"
-            "You receive order confirmation and connection instructions.\n\n"
-            "2. How is ChatGPT Plus activated?\n"
-            "We send an invitation to your Gmail and the subscription activates after you accept it.\n\n"
-            "3. How is CapCut Pro delivered?\n"
-            "After payment confirmation you receive ready-to-use login details.\n\n"
-            "4. How long does activation take?\n"
-            "Usually from a few minutes to a few hours.\n\n"
-            "5. How does payment work?\n"
-            "Payment opens on the secure Multicard checkout page. After payment, the order status updates automatically.\n\n"
-            "6. Do I need a VPN?\n"
-            "Usually no.\n\n"
-            "7. Can I order several accounts?\n"
-            "Yes, use the several-accounts button and the admin will process it.\n\n"
-            "8. What if the email does not arrive?\n"
-            "Check Spam and Promotions, then contact support.\n\n"
-            "9. Can I request another service?\n"
-            "Yes, use the Other section and send your request.\n\n"
-            "10. What should I do if there is a problem after purchase?\n"
-            "Contact support and include your order number."
-        ),
-    },
-    "user.choose_payment_method": {
-        "ru": "Перейдите к оплате.",
-        "uz": "To‘lovga o‘ting.",
-        "en": "Proceed to payment.",
-    },
-    "user.send_payment_proof": {
-        "ru": "После оплаты статус заказа обновится автоматически.",
-        "uz": "To‘lovdan keyin buyurtma holati avtomatik yangilanadi.",
-        "en": "The order status will update automatically after payment.",
-    },
-}
-_TELEGRAM_PAYMENT_TEXT_OVERRIDES: dict[str, dict[str, str]] = {
-    "user.faq_body": {
-        "ru": (
-            "1. Что я получу после оплаты?\n"
-            "Вы получите подтверждение заказа и дальнейшие инструкции по подключению.\n\n"
-            "2. Как подключается ChatGPT Plus?\n"
-            "Мы отправляем приглашение на ваш Gmail, после принятия подписка активируется.\n\n"
-            "3. Как подключается CapCut Pro?\n"
-            "После успешной оплаты бот автоматически выдаёт готовые данные для входа.\n\n"
-            "4. Сколько времени занимает подключение?\n"
-            "Обычно от нескольких минут до нескольких часов, в зависимости от очереди.\n\n"
-            "5. Как проходит оплата?\n"
-            "После нажатия кнопки «Оформить» бот сразу отправляет Telegram invoice. Оплата проходит внутри Telegram, без внешних checkout-страниц и ссылок.\n\n"
-            "6. Нужен ли VPN для использования?\n"
-            "В большинстве случаев нет.\n\n"
-            "7. Можно ли заказать несколько аккаунтов?\n"
-            "Да, используйте кнопку «Хочу несколько», и администратор обработает заявку.\n\n"
-            "8. Что делать, если письмо не пришло?\n"
-            "Проверьте папки «Спам» и «Промоакции», затем напишите в поддержку.\n\n"
-            "9. Можно ли заказать другой сервис?\n"
-            "Да, в разделе «Другое» можно оставить заявку на нужную подписку.\n\n"
-            "10. Что делать, если возникла проблема после покупки?\n"
-            "Напишите в поддержку, указав номер заказа и суть проблемы."
-        ),
-        "uz": (
-            "1. To'lovdan keyin nima olaman?\n"
-            "Buyurtma tasdig'i va ulash bo'yicha ko'rsatmalar olasiz.\n\n"
-            "2. ChatGPT Plus qanday ulanadi?\n"
-            "Gmail'ingizga yuborilgan havolani tasdiqlaysiz va obuna faollashadi.\n\n"
-            "3. CapCut Pro qanday beriladi?\n"
-            "Muvaffaqiyatli to'lovdan keyin bot tayyor login va parolni avtomatik yuboradi.\n\n"
-            "4. Ulanish qancha vaqt oladi?\n"
-            "Odatda bir necha daqiqadan bir necha soatgacha.\n\n"
-            "5. To'lov qanday amalga oshadi?\n"
-            "«Rasmiylashtirish» tugmasidan keyin bot darhol Telegram invoice yuboradi. To'lov faqat Telegram ichida o'tadi, tashqi sahifalar ochilmaydi.\n\n"
-            "6. VPN kerakmi?\n"
-            "Ko'p hollarda yo'q.\n\n"
-            "7. Bir nechta akkaunt buyurtma qilish mumkinmi?\n"
-            "Ha, «Bir nechta kerak» tugmasi orqali so'rov yuboring.\n\n"
-            "8. Xat kelmasa nima qilaman?\n"
-            "Spam va Promotions papkalarini tekshiring, keyin yordamga yozing.\n\n"
-            "9. Boshqa xizmat buyurtma qilish mumkinmi?\n"
-            "Ha, «Boshqa» bo'limida so'rov qoldiring.\n\n"
-            "10. Xariddan keyin muammo bo'lsa nima qilaman?\n"
-            "Buyurtma raqami bilan yordam xizmatiga yozing."
-        ),
-        "en": (
-            "1. What do I receive after payment?\n"
-            "You receive order confirmation and connection instructions.\n\n"
-            "2. How is ChatGPT Plus activated?\n"
-            "We send an invitation to your Gmail and the subscription activates after you accept it.\n\n"
-            "3. How is CapCut Pro delivered?\n"
-            "After successful payment the bot automatically delivers ready-to-use login details.\n\n"
-            "4. How long does activation take?\n"
-            "Usually from a few minutes to a few hours.\n\n"
-            "5. How does payment work?\n"
-            "After pressing Proceed, the bot immediately sends a Telegram invoice. Payment happens inside Telegram without external checkout pages.\n\n"
-            "6. Do I need a VPN?\n"
-            "Usually no.\n\n"
-            "7. Can I order several accounts?\n"
-            "Yes, use the several-accounts button and the admin will process it.\n\n"
-            "8. What if the email does not arrive?\n"
-            "Check Spam and Promotions, then contact support.\n\n"
-            "9. Can I request another service?\n"
-            "Yes, use the Other section and send your request.\n\n"
-            "10. What should I do if there is a problem after purchase?\n"
-            "Contact support and include your order number."
-        ),
-    },
-    "user.choose_payment_method": {
-        "ru": "Бот отправит Telegram invoice для оплаты.",
-        "uz": "Bot Telegram invoice yuboradi.",
-        "en": "The bot will send a Telegram invoice for payment.",
-    },
-    "user.send_payment_proof": {
-        "ru": "После оплаты внутри Telegram статус заказа обновится автоматически.",
-        "uz": "Telegram ichidagi to'lovdan keyin buyurtma holati avtomatik yangilanadi.",
-        "en": "After paying inside Telegram, the order status updates automatically.",
-    },
-}
-_PRODUCT_TRANSLATION_OVERRIDES: dict[str, dict[str, dict[str, str]]] = {
-    "capcut_pro_month": {
-        "ru": {
-            "description": (
-                "💠 Товар: CapCut Pro (1 месяц)\n"
-                "💰 Стоимость: 49,000 сум (~350 ₽)\n"
-                "—————————————————-\n"
-                "⚙️ Как проходит подключение\n"
-                " 1. Мы отправляем вам готовый аккаунт который создается после заказа\n"
-                " 2. Вы скопируете эти данные ввиде(login,parol) и вставляете capcut\n"
-                " 3. если у вас есть аккаунт то сначала вам нужно выйти и зайти способом\n"
-                "&lt;&lt;войти через почту&gt;&gt;\n"
-                "⏱ Срок действия — 30 дней с момента активации\n\n"
-                "🔐 Безопасность\n"
-                "— Без вылетов\n"
-                "— Вход осуществляется только вами\n"
-                "— Используются официальные методы подключения\n\n"
-                "— Поддержка на всех этапах подключения 💬\n"
-                "— Доступно для пользователей из СНГ и других стран\n"
-                "⸻\n"
-                "✅ Преимущества\n"
-                "✔️ Быстрое подключение\n"
-                "✔️ Прозрачные условия\n"
-                "✔️ Сопровождение после покупки"
-            ),
-        },
-        "uz": {
-            "description": (
-                "💠 Mahsulot: CapCut Pro (1 oy)\n"
-                "💰 Narxi: 49,000 so‘m (~350 ₽)\n"
-                "—————————————————-\n"
-                "⚙️ Qanday ulanadi\n"
-                "1. Buyurtmadan so‘ng sizga tayyor akkaunt yuboriladi\n"
-                "2. Siz ushbu ma’lumotlarni (login, parol) nusxalab CapCut ga kiritasiz\n"
-                "3. Agar sizda akkaunt bo‘lsa, avval undan chiqib, &lt;&gt; usuli bilan qayta kiring\n"
-                "⏱ Faol muddati — faollashtirilgan vaqtdan boshlab 30 kun\n\n"
-                "🔐 Xavfsizlik\n"
-                "— Uzilishlarsiz\n"
-                "— Kirish faqat siz tomonidan amalga oshiriladi\n"
-                "— Rasmiy ulanish usullari ishlatiladi\n\n"
-                "— Ulanishning barcha bosqichlarida yordam 💬\n"
-                "— MDH va boshqa davlatlar foydalanuvchilari uchun mavjud\n"
-                "⸻\n"
-                "✅ Afzalliklar\n"
-                "✔️ Tez ulanish\n"
-                "✔️ Shaffof shartlar\n"
-                "✔️ Xariddan keyingi yordam"
-            ),
-        },
-        "en": {
-            "description": (
-                "💠 Product: CapCut Pro (1 month)\n"
-                "💰 Price: 49,000 UZS (~350 ₽)\n"
-                "—————————————————-\n"
-                "⚙️ How connection works\n"
-                "1. We send you a ready account created after the order\n"
-                "2. You copy these details (login, password) and paste them into CapCut\n"
-                "3. If you already have an account, first log out and then sign in using\n"
-                "&lt;&gt;\n"
-                "⏱ Duration — 30 days from activation\n\n"
-                "🔐 Security\n"
-                "— No crashes\n"
-                "— Only you can access it\n"
-                "— Official connection methods are used\n\n"
-                "— Support at every connection step 💬\n"
-                "— Available for users from CIS and other countries\n"
-                "⸻\n"
-                "✅ Advantages\n"
-                "✔️ Fast connection\n"
-                "✔️ Transparent terms\n"
-                "✔️ Support after purchase"
-            ),
-        },
-    },
-}
 _REPLACEABLE_TEXT_DEFAULTS: dict[str, dict[str, str]] = {
     "user.main_title": {"ru": "Subnowa", "uz": "Subnowa", "en": "Subnowa"},
     "user.main_body": {"ru": "Выберите раздел ниже.", "uz": "Quyidagi bo'limlardan birini tanlang.", "en": "Choose a section below."},
@@ -491,13 +250,10 @@ async def initialize_database(
         await seed_categories(session)
         await normalize_category_slugs(session)
         await seed_products(session)
-        await sync_product_copy_once(session)
         await seed_payment_methods(session)
         await seed_texts(session)
         await seed_layouts(session, settings)
         await sync_legacy_ui_once(session, settings)
-        await sync_multicard_payment_copy_once(session)
-        await sync_telegram_payment_copy_once(session)
         await seed_product_payment_links(session)
         await session.commit()
 
@@ -507,21 +263,6 @@ async def ensure_runtime_schema(session: AsyncSession) -> None:
         session,
         "orders",
         "expires_at",
-        {
-            "postgresql": "TIMESTAMP WITH TIME ZONE",
-            "sqlite": "DATETIME",
-            "default": "DATETIME",
-        },
-    )
-    await _ensure_column(session, "orders", "payment_provider", {"postgresql": "VARCHAR(32)", "sqlite": "TEXT", "default": "TEXT"})
-    await _ensure_column(session, "orders", "payment_status", {"postgresql": "VARCHAR(32)", "sqlite": "TEXT", "default": "TEXT"})
-    await _ensure_column(session, "orders", "invoice_id", {"postgresql": "VARCHAR(255)", "sqlite": "TEXT", "default": "TEXT"})
-    await _ensure_column(session, "orders", "invoice_uuid", {"postgresql": "VARCHAR(64)", "sqlite": "TEXT", "default": "TEXT"})
-    await _ensure_column(session, "orders", "checkout_url", {"postgresql": "TEXT", "sqlite": "TEXT", "default": "TEXT"})
-    await _ensure_column(
-        session,
-        "orders",
-        "invoice_expiry_at",
         {
             "postgresql": "TIMESTAMP WITH TIME ZONE",
             "sqlite": "DATETIME",
@@ -635,35 +376,6 @@ async def seed_products(session: AsyncSession) -> None:
                 translation.name = payload["name"]
             if not translation.description:
                 translation.description = payload["description"]
-
-
-async def sync_product_copy_once(session: AsyncSession) -> None:
-    marker = await session.scalar(select(Setting).where(Setting.key == _PRODUCT_COPY_SYNC_SETTING_KEY))
-    if marker is not None and marker.value == _PRODUCT_COPY_SYNC_VERSION:
-        return
-
-    for product_code, translations in _PRODUCT_TRANSLATION_OVERRIDES.items():
-        product = await session.scalar(select(Product).where(Product.code == product_code))
-        if product is None:
-            continue
-
-        existing = {tr.language.value: tr for tr in product.translations}
-        for lang_code, payload in translations.items():
-            translation = existing.get(lang_code)
-            if translation is None:
-                translation = ProductTranslation(product=product, language=Language(lang_code))
-                session.add(translation)
-            if "name" in payload:
-                translation.name = payload["name"]
-            if "description" in payload:
-                translation.description = payload["description"]
-
-    if marker is None:
-        marker = Setting(key=_PRODUCT_COPY_SYNC_SETTING_KEY)
-        session.add(marker)
-    marker.value = _PRODUCT_COPY_SYNC_VERSION
-    marker.value_type = "string"
-    marker.description = "One-time product copy sync marker"
 
 
 async def seed_payment_methods(session: AsyncSession) -> None:
@@ -790,86 +502,18 @@ async def sync_legacy_ui_once(session: AsyncSession, settings: Settings) -> None
     marker.description = "One-time legacy UI sync marker"
 
 
-async def sync_multicard_payment_copy_once(session: AsyncSession) -> None:
-    marker = await session.scalar(select(Setting).where(Setting.key == _MULTICARD_TEXT_SYNC_SETTING_KEY))
-    if marker is not None and marker.value == _MULTICARD_TEXT_SYNC_VERSION:
-        return
-
-    for code, translations in _MULTICARD_TEXT_OVERRIDES.items():
-        entry = await session.scalar(select(TextEntry).where(TextEntry.code == code))
-        payload = DEFAULT_TEXTS.get(code, {})
-        if entry is None:
-            entry = TextEntry(code=code)
-            entry.group_name = payload.get("group", "user")
-            entry.description = payload.get("description", "")
-            session.add(entry)
-            await session.flush()
-        else:
-            if payload:
-                entry.group_name = payload.get("group", entry.group_name)
-                entry.description = payload.get("description", entry.description)
-
-        existing = {tr.language.value: tr for tr in entry.translations}
-        for lang_code, value in translations.items():
-            translation = existing.get(lang_code)
-            if translation is None:
-                translation = TextTranslation(text_entry=entry, language=Language(lang_code))
-                session.add(translation)
-            translation.value = value
-
-    if marker is None:
-        marker = Setting(key=_MULTICARD_TEXT_SYNC_SETTING_KEY)
-        session.add(marker)
-    marker.value = _MULTICARD_TEXT_SYNC_VERSION
-    marker.value_type = "string"
-    marker.description = "One-time Multicard checkout text sync marker"
-
-
-async def sync_telegram_payment_copy_once(session: AsyncSession) -> None:
-    marker = await session.scalar(select(Setting).where(Setting.key == _TELEGRAM_PAYMENT_SYNC_SETTING_KEY))
-    if marker is not None and marker.value == _TELEGRAM_PAYMENT_SYNC_VERSION:
-        return
-
-    for code, translations in _TELEGRAM_PAYMENT_TEXT_OVERRIDES.items():
-        entry = await session.scalar(select(TextEntry).where(TextEntry.code == code))
-        payload = DEFAULT_TEXTS.get(code, {})
-        if entry is None:
-            entry = TextEntry(code=code)
-            entry.group_name = payload.get("group", "user")
-            entry.description = payload.get("description", "")
-            session.add(entry)
-            await session.flush()
-        else:
-            if payload:
-                entry.group_name = payload.get("group", entry.group_name)
-                entry.description = payload.get("description", entry.description)
-
-        existing = {tr.language.value: tr for tr in entry.translations}
-        for lang_code, value in translations.items():
-            translation = existing.get(lang_code)
-            if translation is None:
-                translation = TextTranslation(text_entry=entry, language=Language(lang_code))
-                session.add(translation)
-            translation.value = value
-
-    if marker is None:
-        marker = Setting(key=_TELEGRAM_PAYMENT_SYNC_SETTING_KEY)
-        session.add(marker)
-    marker.value = _TELEGRAM_PAYMENT_SYNC_VERSION
-    marker.value_type = "string"
-    marker.description = "One-time Telegram Payments text sync marker"
-
-
 async def seed_product_payment_links(session: AsyncSession) -> None:
-    if await session.scalar(select(ProductPaymentMethod.id).limit(1)) is not None:
-        return
-
     products = {row.code: row for row in (await session.scalars(select(Product))).all()}
     payments = {row.code: row for row in (await session.scalars(select(PaymentMethod))).all()}
+    existing_pairs = {
+        (row.product_id, row.payment_method_id)
+        for row in (await session.scalars(select(ProductPaymentMethod))).all()
+    }
 
     link_map = {
         "chatgpt_plus_month": ["click", "card", "usdt_trc20"],
         "capcut_pro_month": ["click", "card", "usdt_trc20"],
+        "capcut_personal_month": ["click", "card"],
         "grok_template": ["click", "card", "usdt_trc20"],
         "adobe_template": ["click", "card", "usdt_trc20"],
     }
@@ -882,6 +526,9 @@ async def seed_product_payment_links(session: AsyncSession) -> None:
             payment = payments.get(payment_code)
             if payment is None:
                 continue
+            if (product.id, payment.id) in existing_pairs:
+                continue
             link = ProductPaymentMethod(product=product, payment_method=payment)
             session.add(link)
             link.sort_order = index * 10
+            existing_pairs.add((product.id, payment.id))

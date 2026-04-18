@@ -14,8 +14,8 @@ from services.admin import build_stats_text
 from services.buttons import build_layout_markup, get_button, get_layout, list_layouts
 from services.capcut import add_bulk_accounts, add_capcut_account, claim_free_account, count_free_accounts, list_accounts, purge_expired_accounts
 from services.catalog import category_name, get_category, get_product, product_name
+from services.chatgpt_invite_service import start_chatgpt_business_order
 from services.context import AppContext
-from services.order_processing import approve_order_by_admin, reject_order_by_admin
 from services.orders import change_status, get_order_by_id, get_order_by_reference, list_orders
 from services.payments import get_payment_method, payment_title, toggle_product_payment_method
 from services.texts import format_text
@@ -64,7 +64,13 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
 
     def _order_actions_markup(order: Order) -> InlineKeyboardMarkup:
         rows: list[list[InlineKeyboardButton]] = []
-        if order.status in {OrderStatus.WAITING_CHECK, OrderStatus.PAID, OrderStatus.PROCESSING}:
+        if order.status in {
+            OrderStatus.WAITING_CHECK,
+            OrderStatus.PAID,
+            OrderStatus.PROCESSING,
+            OrderStatus.WAITING,
+            OrderStatus.FAILED,
+        }:
             rows.append([InlineKeyboardButton(text="Подтвердить", callback_data=f"admin:approve:{order.id}")])
             rows.append([InlineKeyboardButton(text="Отклонить", callback_data=f"admin:reject:{order.id}")])
         rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:orders")])
@@ -385,22 +391,11 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
-            try:
-                await approve_order_by_admin(
-                    session,
-                    bot,
-                    app.settings,
-                    order,
-                    changed_by_telegram_id=callback.from_user.id,
-                )
-            except RuntimeError as exc:
-                if str(exc) == "capcut_stock_empty":
-                    await callback.answer("РЎРєР»Р°Рґ CapCut РїСѓСЃС‚.", show_alert=True)
-                    return
-                raise
-            await callback.answer("РџРѕРґС‚РІРµСЂР¶РґРµРЅРѕ")
-            await admin_order_detail_handler(callback)
-            return
+            if order.workflow_type == "chatgpt_manual":
+                launched = await start_chatgpt_business_order(app, bot, order.id, callback.from_user.id)
+                await callback.answer("Автоматизация уже запущена." if not launched else "Автоматизация запущена")
+                await admin_order_detail_handler(callback)
+                return
             language = await _user_lang(session, order)
             if order.status in {OrderStatus.PAID, OrderStatus.PROCESSING}:
                 if order.workflow_type == "capcut_auto":
@@ -444,16 +439,6 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             if order is None:
                 await callback.answer()
                 return
-            await reject_order_by_admin(
-                session,
-                bot,
-                app.settings,
-                order,
-                changed_by_telegram_id=callback.from_user.id,
-            )
-            await callback.answer("РћС‚РєР»РѕРЅРµРЅРѕ")
-            await admin_order_detail_handler(callback)
-            return
             language = await _user_lang(session, order)
             await change_status(session, order, OrderStatus.REJECTED, callback.from_user.id, "rejected by admin")
             await session.commit()

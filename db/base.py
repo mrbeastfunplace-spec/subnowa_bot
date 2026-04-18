@@ -30,7 +30,9 @@ class OrderStatus(str, Enum):
     WAITING_CHECK = "waiting_check"
     PAID = "paid"
     PROCESSING = "processing"
+    WAITING = "waiting"
     COMPLETED = "completed"
+    FAILED = "failed"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
 
@@ -45,4 +47,3 @@ class PaymentProviderType(str, Enum):
 class ButtonActionType(str, Enum):
     CALLBACK = "callback"
     URL = "url"
-

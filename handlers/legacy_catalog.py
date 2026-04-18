@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
 import re
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message, PreCheckoutQuery
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from db.base import OrderStatus
 from handlers.common import profile_markup
@@ -13,46 +14,34 @@ from services.capcut import count_free_accounts
 from services.catalog import get_product, get_product_by_code
 from services.context import AppContext
 from services.legacy_ui import (
-    build_capcut_menu_markup,
     build_capcut_details_markup,
+    build_capcut_selector_markup,
     build_details_markup,
     build_gmail_choice_markup,
+    build_invoice_markup,
     build_menu_only_markup,
     build_other_menu_markup,
+    build_payment_back_markup,
     build_single_back_markup,
     build_stock_empty_markup,
     build_subscription_check_markup,
     build_subscriptions_markup,
     build_chatgpt_menu_markup,
+    capcut_personal_text,
+    capcut_ready_text,
     capcut_card_text,
     chatgpt_card_text,
+    crypto_price_for_product,
+    invoice_text,
     multi_service_name,
     other_request_name,
+    payment_instruction_text,
     product_title,
     text as ui_text,
 )
-from services.order_processing import mark_order_paid
-from services.orders import (
-    change_status,
-    create_custom_request,
-    create_order,
-    get_order_by_id,
-    get_order_by_number,
-    store_checkout_message_ref,
-    update_payment_meta,
-)
+from services.orders import attach_payment_method, change_status, create_custom_request, create_order, get_order_by_id, save_payment_proof
+from services.payments import get_payment_method, list_product_payment_methods
 from services.settings import get_setting
-from services.telegram_payments import (
-    can_pay_order,
-    create_order_invoice_link,
-    invalid_order_text,
-    invoice_total_amount,
-    payment_provider_name,
-    payment_unavailable_text,
-    pre_checkout_error_text,
-    provider_token_enabled,
-    send_order_invoice,
-)
 from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
 from states import UserFlowState
 from utils.formatting import user_display_name
@@ -60,10 +49,18 @@ from utils.messages import answer_or_edit
 
 
 GMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@gmail\.com$", re.IGNORECASE)
+EMAIL_PATTERN = re.compile(r"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$", re.IGNORECASE)
+CARD_NUMBER = "9860100126034816"
+USDT_TRC20_ADDRESS = "TUr3m7sAWpiysQs5S1jQkbxcvJARqAD8Rs"
+CLICK_QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "media" / "click.png.jpg"
 
 
 def _is_valid_gmail(value: str) -> bool:
     return bool(GMAIL_PATTERN.match(value.strip()))
+
+
+def _is_valid_email(value: str) -> bool:
+    return bool(EMAIL_PATTERN.match(value.strip()))
 
 
 async def _check_subscription(bot: Bot, channel: str, user_id: int) -> bool:
@@ -99,87 +96,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             reply_markup=build_subscriptions_markup(language),
         )
 
-    async def _send_text(target: CallbackQuery | Message, text: str) -> None:
-        if isinstance(target, CallbackQuery):
-            await target.answer(text, show_alert=True)
-            return
-        await target.answer(text)
-
-    def _manual_payment_removed_text(language: str) -> str:
-        if language == "uz":
-            return "To'lov endi faqat Telegram ichidagi invoice orqali o'tadi. Buyurtmani qayta ochib invoice yuborilgan xabardan to'lang."
-        if language == "en":
-            return "Payment now works only through the Telegram invoice. Open the order again and pay from the invoice message."
-        return "Оплата теперь проходит только через Telegram invoice. Откройте заказ заново и оплатите из сообщения со счётом."
-
-    def _capcut_subscription_text(language: str) -> str:
-        if language == "uz":
-            return "<b>CapCut Pro</b>\n\nTo'lovga o'tishdan oldin kanalga obuna bo'ling.\nKeyin <b>Obunani tekshirish</b> tugmasini bosing."
-        if language == "en":
-            return "<b>CapCut Pro</b>\n\nBefore payment, subscribe to the channel.\nThen press <b>Check subscription</b>."
-        return "<b>CapCut Pro</b>\n\nПеред оплатой подпишитесь на канал.\nПосле этого нажмите <b>Проверить подписку</b>."
-
-    def _capcut_checkout_text(language: str, order_number: str) -> str:
-        if language == "uz":
-            return (
-                f"<b>CapCut Pro</b>\n\n"
-                f"Buyurtma: <code>{order_number}</code>\n"
-                "To'lov tayyor.\n"
-                "<b>To‘lovga o‘tish</b> tugmasi orqali Telegram ichida to'lovni oching."
-            )
-        if language == "en":
-            return (
-                f"<b>CapCut Pro</b>\n\n"
-                f"Order: <code>{order_number}</code>\n"
-                "Payment is ready.\n"
-                "Use <b>Proceed to payment</b> to open payment inside Telegram."
-            )
-        return (
-            f"<b>CapCut Pro</b>\n\n"
-            f"Заказ: <code>{order_number}</code>\n"
-            "Оплата готова.\n"
-            "Нажмите <b>Перейти к оплате</b>, чтобы открыть оплату внутри Telegram."
+    async def _show_invoice(callback: CallbackQuery, order, language: str, payment_methods: list[object]) -> None:
+        await answer_or_edit(
+            callback,
+            invoice_text(language, order.product_code_snapshot, order.order_number, order.amount),
+            reply_markup=build_invoice_markup(language, order.id, payment_methods),
         )
-
-    async def _send_invoice_for_order(
-        target: CallbackQuery | Message,
-        session,
-        order,
-        language: str,
-    ) -> bool:
-        if not provider_token_enabled(app.settings):
-            await _send_text(target, payment_unavailable_text(language))
-            return False
-        if not can_pay_order(order):
-            await _send_text(target, invalid_order_text(language))
-            return False
-        try:
-            invoice_message = await send_order_invoice(
-                bot,
-                app.settings,
-                order,
-                chat_id=target.from_user.id,
-                language=language,
-            )
-        except Exception:
-            await _send_text(target, payment_unavailable_text(language))
-            return False
-
-        await update_payment_meta(
-            session,
-            order,
-            payment_provider=payment_provider_name(),
-            payment_status="invoice_sent",
-            invoice_id=order.order_number,
-        )
-        await store_checkout_message_ref(
-            session,
-            order,
-            chat_id=invoice_message.chat.id,
-            message_id=invoice_message.message_id,
-        )
-        await session.commit()
-        return True
 
     @router.callback_query(F.data.in_({"menu:catalog", "open_subscriptions"}))
     async def open_catalog_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -256,13 +178,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def open_capcut_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
-            product = await get_product_by_code(session, "capcut_pro_month")
         await state.clear()
         await callback.answer()
         await answer_or_edit(
             callback,
             ui_text(language, "capcut_menu_text"),
-            reply_markup=build_capcut_menu_markup(language, app.settings.support_url, product.price if product else 49000),
+            reply_markup=build_capcut_selector_markup(language),
         )
 
     @router.callback_query(F.data == "capcut_locked")
@@ -286,23 +207,32 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
 
     @router.callback_query(F.data == "capcut_1m")
     async def capcut_1m_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        await open_capcut_handler(callback, state)
+
+    @router.callback_query(F.data == "capcut_personal")
+    async def capcut_personal_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            product = await get_product_by_code(session, "capcut_personal_month")
+        await state.clear()
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            capcut_personal_text(language, product.price if product else 79000),
+            reply_markup=build_capcut_details_markup(language, "capcut_personal"),
+        )
+
+    @router.callback_query(F.data == "capcut_ready")
+    async def capcut_ready_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             product = await get_product_by_code(session, "capcut_pro_month")
-            free_count = await count_free_accounts(session)
         await state.clear()
         await callback.answer()
-        if free_count <= 0:
-            await answer_or_edit(
-                callback,
-                ui_text(language, "stock_empty"),
-                reply_markup=build_stock_empty_markup(language, app.settings.support_url),
-            )
-            return
         await answer_or_edit(
             callback,
-            capcut_card_text(language, product.price if product else 49000),
-            reply_markup=build_details_markup(language, "capcut_1m"),
+            capcut_ready_text(language, product.price if product else 49000),
+            reply_markup=build_capcut_details_markup(language, "capcut_ready"),
         )
 
     @router.callback_query(F.data == "back_to_chatgpt_1m")
@@ -313,8 +243,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def back_to_capcut_handler(callback: CallbackQuery, state: FSMContext) -> None:
         await open_capcut_handler(callback, state)
 
-    @router.callback_query(F.data == "capcut:cancel")
-    async def capcut_cancel_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    @router.callback_query(F.data == "back_to_capcut_personal")
+    async def back_to_capcut_personal_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        await open_capcut_handler(callback, state)
+
+    @router.callback_query(F.data == "back_to_capcut_ready")
+    async def back_to_capcut_ready_handler(callback: CallbackQuery, state: FSMContext) -> None:
         await open_capcut_handler(callback, state)
 
     @router.callback_query(F.data.in_({"multi_chatgpt", "multi_capcut"}))
@@ -410,8 +344,8 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         gmail = (message.text or "").strip()
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            if not _is_valid_gmail(gmail):
-                await message.answer(ui_text(language, "invalid_gmail"))
+            if not _is_valid_email(gmail):
+                await message.answer(ui_text(language, "invalid_email"))
                 return
             required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
         await state.update_data(trial_gmail=gmail)
@@ -569,11 +503,11 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language, details={"gmail": gmail})
             order.product_name_snapshot = product_title(language, product.code)
+            payment_methods = await list_product_payment_methods(session, product)
             await session.commit()
-            await state.clear()
-            await callback.answer()
-            if not await _send_invoice_for_order(callback, session, order, language):
-                return
+        await state.clear()
+        await callback.answer()
+        await _show_invoice(callback, order, language, payment_methods)
         await _notify_admins(
             bot,
             app,
@@ -588,39 +522,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
 
     @router.callback_query(F.data == "buy_capcut_1m")
     async def buy_capcut_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        async with app.session_factory() as session:
-            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
-            product = await get_product_by_code(session, "capcut_pro_month")
-            free_count = await count_free_accounts(session)
-            required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
-            if product is None:
-                await callback.answer()
-                return
-            if free_count <= 0:
-                await callback.answer()
-                await answer_or_edit(
-                    callback,
-                    ui_text(language, "stock_empty"),
-                    reply_markup=build_stock_empty_markup(language, app.settings.support_url),
-                )
-                return
-        await state.clear()
-        await callback.answer()
-        await answer_or_edit(
-            callback,
-            _capcut_subscription_text(language),
-            reply_markup=build_subscription_check_markup(language, required_channel, "capcut:check"),
-        )
+        await buy_capcut_ready_handler(callback, state)
 
-    @router.callback_query(F.data == "capcut:check")
-    async def capcut_check_handler(callback: CallbackQuery, state: FSMContext) -> None:
+    @router.callback_query(F.data == "buy_capcut_ready")
+    async def buy_capcut_ready_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
-            required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
-            subscribed = await _check_subscription(bot, required_channel, callback.from_user.id)
-            if not subscribed:
-                await callback.answer(ui_text(language, "trial_not_subscribed"), show_alert=True)
-                return
             user = await get_user_by_telegram_id(session, callback.from_user.id)
             product = await get_product_by_code(session, "capcut_pro_month")
             free_count = await count_free_accounts(session)
@@ -637,33 +544,28 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 return
             order = await create_order(session, user=user, product=product, language=language)
             order.product_name_snapshot = product_title(language, product.code)
-            try:
-                payment_url = await create_order_invoice_link(
-                    bot,
-                    app.settings,
-                    order,
-                    language=language,
-                )
-            except Exception:
-                await session.rollback()
-                await callback.answer(payment_unavailable_text(language), show_alert=True)
-                return
-            await update_payment_meta(
-                session,
-                order,
-                payment_provider=payment_provider_name(),
-                payment_status="invoice_link_ready",
-                invoice_id=order.order_number,
-                checkout_url=payment_url,
-            )
+            payment_methods = await list_product_payment_methods(session, product)
             await session.commit()
-            await state.clear()
-            await callback.answer()
-            await answer_or_edit(
-                callback,
-                _capcut_checkout_text(language, order.order_number),
-                reply_markup=build_capcut_details_markup(language, app.settings.support_url, order.id, payment_url),
-            )
+        await state.clear()
+        await callback.answer()
+        await _show_invoice(callback, order, language, payment_methods)
+
+    @router.callback_query(F.data == "buy_capcut_personal")
+    async def buy_capcut_personal_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            user = await get_user_by_telegram_id(session, callback.from_user.id)
+            product = await get_product_by_code(session, "capcut_personal_month")
+            if user is None or product is None:
+                await callback.answer()
+                return
+            order = await create_order(session, user=user, product=product, language=language)
+            order.product_name_snapshot = product_title(language, product.code)
+            payment_methods = await list_product_payment_methods(session, product)
+            await session.commit()
+        await state.clear()
+        await callback.answer()
+        await _show_invoice(callback, order, language, payment_methods)
 
     @router.callback_query(F.data.startswith("product:view:"))
     async def legacy_product_view_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -677,7 +579,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await chatgpt_1m_handler(callback, state)
             return
         if product.code == "capcut_pro_month":
-            await capcut_1m_handler(callback, state)
+            await open_capcut_handler(callback, state)
             return
         await open_catalog_handler(callback, state)
 
@@ -697,7 +599,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await buy_chatgpt_handler(callback, state)
             return
         if product.code == "capcut_pro_month":
-            await buy_capcut_handler(callback, state)
+            await open_capcut_handler(callback, state)
+            return
+        if product.code == "capcut_personal_month":
+            await buy_capcut_personal_handler(callback, state)
             return
         await callback.answer()
 
@@ -707,11 +612,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             order = await get_order_by_id(session, order_id)
-            if order is None:
+            if order is None or order.product is None:
                 await callback.answer()
                 return
-            await callback.answer()
-            await _send_invoice_for_order(callback, session, order, language)
+            payment_methods = await list_product_payment_methods(session, order.product)
+        await callback.answer()
+        await _show_invoice(callback, order, language, payment_methods)
 
     @router.callback_query(F.data.startswith("order:promo:"))
     async def order_promo_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -734,36 +640,69 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
             await state.clear()
-        await message.answer("К сожалению, такого промокода не существует.")
-        if return_to == "profile":
-            display_name = escape(user_display_name(message.from_user, message.from_user.id))
-            await message.answer(
-                "<b>Ваш профиль\n\nВыберите раздел 👇</b>\n\n"
-                f"Пользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
-                reply_markup=profile_markup(language, app.settings.support_url),
-            )
-            return
-        if isinstance(return_to, str) and return_to.startswith("payment:"):
-            order_id = int(return_to.split(":")[-1])
-            async with app.session_factory() as session:
+            await message.answer("К сожалению, такого промокода не существует.")
+            if return_to == "profile":
+                display_name = escape(user_display_name(message.from_user, message.from_user.id))
+                await message.answer(
+                    "<b>Ваш профиль\n\nВыберите раздел 👇</b>\n\n"
+                    f"Пользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
+                    reply_markup=profile_markup(language, app.settings.support_url),
+                )
+                return
+            if isinstance(return_to, str) and return_to.startswith("payment:"):
+                order_id = int(return_to.split(":")[-1])
                 order = await get_order_by_id(session, order_id)
-                if order is None:
-                    await message.answer(_manual_payment_removed_text(language))
+                if order is None or order.product is None:
                     return
-                await _send_invoice_for_order(message, session, order, language)
+                payment_methods = await list_product_payment_methods(session, order.product)
+                await message.answer(
+                    invoice_text(language, order.product_code_snapshot, order.order_number, order.amount),
+                    reply_markup=build_invoice_markup(language, order.id, payment_methods),
+                )
 
     @router.callback_query(F.data.startswith("order:pay:"))
     async def order_payment_method_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        _, _, order_id, _ = callback.data.split(":")
+        _, _, order_id, payment_id = callback.data.split(":")
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             order = await get_order_by_id(session, int(order_id))
-            if order is None:
+            payment_method = await get_payment_method(session, int(payment_id))
+            if order is None or payment_method is None:
                 await callback.answer()
                 return
-            await state.clear()
-            await callback.answer()
-            await _send_invoice_for_order(callback, session, order, language)
+            await attach_payment_method(session, order, payment_method)
+            await session.commit()
+        await state.set_state(UserFlowState.waiting_payment_proof)
+        await state.update_data(order_id=int(order_id))
+        payment_text = payment_instruction_text(
+            language,
+            payment_method.code,
+            order.order_number,
+            order.product_name_snapshot,
+            order.amount,
+            crypto_price_for_product(order.product_code_snapshot),
+            CARD_NUMBER,
+            USDT_TRC20_ADDRESS,
+        )
+        await callback.answer()
+        if payment_method.code == "click" and CLICK_QR_IMAGE_PATH.exists():
+            if callback.message is not None:
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+            await bot.send_photo(
+                callback.from_user.id,
+                photo=FSInputFile(str(CLICK_QR_IMAGE_PATH)),
+                caption=payment_text,
+                reply_markup=build_payment_back_markup(language, int(order_id), app.settings.support_url),
+            )
+            return
+        await answer_or_edit(
+            callback,
+            payment_text,
+            reply_markup=build_payment_back_markup(language, int(order_id), app.settings.support_url),
+        )
 
     @router.callback_query(F.data.startswith("order:cancel:"))
     async def order_cancel_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -789,87 +728,70 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def payment_photo_handler(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         order_id = data.get("order_id")
-        await state.clear()
+        if not order_id:
+            await message.answer("Заказ для чека не найден.")
+            return
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            order = await get_order_by_id(session, int(order_id)) if order_id else None
+            order = await get_order_by_id(session, int(order_id))
             if order is None:
-                await message.answer(_manual_payment_removed_text(language))
+                await message.answer("Заказ не найден.")
                 return
-            await _send_invoice_for_order(message, session, order, language)
+            await save_payment_proof(session, order, message.photo[-1].file_id, "photo", changed_by_telegram_id=message.from_user.id)
+            await session.commit()
+        await state.clear()
+        await message.answer(ui_text(language, "payment_check_saved"))
+        for admin_id in app.settings.admin_ids:
+            try:
+                await bot.send_photo(
+                    admin_id,
+                    photo=message.photo[-1].file_id,
+                    caption=(
+                        "Новый чек\n\n"
+                        f"Заказ: <code>{order.order_number}</code>\n"
+                        f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
+                        f"Товар: {escape(order.product_name_snapshot)}"
+                    ),
+                    reply_markup=_admin_order_markup(order.id),
+                )
+            except Exception:
+                continue
 
     @router.message(UserFlowState.waiting_payment_proof, F.document)
     async def payment_document_handler(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         order_id = data.get("order_id")
-        await state.clear()
+        if not order_id:
+            await message.answer("Заказ для чека не найден.")
+            return
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            order = await get_order_by_id(session, int(order_id)) if order_id else None
+            order = await get_order_by_id(session, int(order_id))
             if order is None:
-                await message.answer(_manual_payment_removed_text(language))
+                await message.answer("Заказ не найден.")
                 return
-            await _send_invoice_for_order(message, session, order, language)
+            await save_payment_proof(session, order, message.document.file_id, "document", changed_by_telegram_id=message.from_user.id)
+            await session.commit()
+        await state.clear()
+        await message.answer(ui_text(language, "payment_check_saved"))
+        for admin_id in app.settings.admin_ids:
+            try:
+                await bot.send_document(
+                    admin_id,
+                    document=message.document.file_id,
+                    caption=(
+                        "Новый чек\n\n"
+                        f"Заказ: <code>{order.order_number}</code>\n"
+                        f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
+                        f"Товар: {escape(order.product_name_snapshot)}"
+                    ),
+                    reply_markup=_admin_order_markup(order.id),
+                )
+            except Exception:
+                continue
 
     @router.message(UserFlowState.waiting_payment_proof)
-    async def payment_invalid_handler(message: Message, state: FSMContext) -> None:
-        data = await state.get_data()
-        order_id = data.get("order_id")
-        await state.clear()
-        async with app.session_factory() as session:
-            language = await get_user_language(session, message.from_user.id, app.settings.default_language)
-            order = await get_order_by_id(session, int(order_id)) if order_id else None
-            if order is None:
-                await message.answer(_manual_payment_removed_text(language))
-                return
-            await _send_invoice_for_order(message, session, order, language)
-
-    @router.pre_checkout_query()
-    async def pre_checkout_handler(query: PreCheckoutQuery) -> None:
-        async with app.session_factory() as session:
-            order = await get_order_by_number(session, query.invoice_payload)
-            language = order.language if order is not None else app.settings.default_language
-            if order is None:
-                await query.answer(ok=False, error_message=pre_checkout_error_text(language))
-                return
-            if not can_pay_order(order):
-                await query.answer(ok=False, error_message=invalid_order_text(language))
-                return
-            if query.currency != (order.currency or "").upper() or query.total_amount != invoice_total_amount(order):
-                await query.answer(ok=False, error_message=pre_checkout_error_text(language))
-                return
-        await query.answer(ok=True)
-
-    @router.message(F.successful_payment)
-    async def successful_payment_handler(message: Message) -> None:
-        payment = message.successful_payment
-        if payment is None:
-            return
-
-        async with app.session_factory() as session:
-            order = await get_order_by_number(session, payment.invoice_payload)
-            if order is None:
-                await message.answer(pre_checkout_error_text(app.settings.default_language))
-                return
-            if payment.currency != (order.currency or "").upper() or payment.total_amount != invoice_total_amount(order):
-                await message.answer(pre_checkout_error_text(order.language or app.settings.default_language))
-                return
-
-            await update_payment_meta(
-                session,
-                order,
-                payment_provider=payment_provider_name(),
-                payment_status="paid",
-                invoice_id=payment.telegram_payment_charge_id,
-                invoice_uuid=payment.provider_payment_charge_id,
-            )
-            await mark_order_paid(
-                session,
-                bot,
-                app.settings,
-                order,
-                note="telegram_payments:successful_payment",
-            )
-            await session.commit()
+    async def payment_invalid_handler(message: Message) -> None:
+        await message.answer("Отправьте чек фотографией или документом.")
 
     return router

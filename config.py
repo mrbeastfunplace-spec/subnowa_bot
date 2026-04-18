@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlsplit
 
 try:
     from dotenv import load_dotenv
@@ -32,6 +32,104 @@ def _parse_admin_ids(value: str | None) -> list[int]:
     return result
 
 
+def _parse_bool(value: str | None, default: bool) -> bool:
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _coerce_bool(value: object, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return _parse_bool(str(value), default)
+
+
+def _coerce_int(value: object, default: int, *, field_name: str) -> int:
+    if value in {None, ""}:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"ChatGPT workspace has invalid {field_name}: {value!r}") from exc
+    return max(1, parsed)
+
+
+@dataclass(slots=True, frozen=True)
+class ChatGPTWorkspaceConfig:
+    id: str
+    name: str
+    workspace_url: str
+    profile_dir: Path
+    members_url: str | None = None
+    max_users: int = 5
+    enabled: bool = True
+
+
+def _resolve_path(value: str) -> Path:
+    path = Path(value)
+    if path.is_absolute():
+        return path
+    return BASE_DIR / path
+
+
+def _default_playwright_profile_dir() -> Path:
+    profile_dir_raw = os.getenv("PLAYWRIGHT_PROFILE_DIR", "").strip()
+    if profile_dir_raw:
+        return _resolve_path(profile_dir_raw)
+    return BASE_DIR / "automation" / "auth_state" / "chrome_profile"
+
+
+def _parse_chatgpt_workspaces(
+    value: str | None,
+    *,
+    default_profile_dir: Path,
+    default_max_users: int,
+) -> list[ChatGPTWorkspaceConfig]:
+    if not value:
+        return []
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("CHATGPT_WORKSPACES_JSON must be a valid JSON array") from exc
+    if not isinstance(payload, list):
+        raise RuntimeError("CHATGPT_WORKSPACES_JSON must be a JSON array")
+
+    workspaces: list[ChatGPTWorkspaceConfig] = []
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise RuntimeError("Each ChatGPT workspace config must be a JSON object")
+        name = str(item.get("name") or f"workspace_{index}").strip()
+        workspace_id = str(item.get("id") or name).strip() or f"workspace_{index}"
+        workspace_url = str(item.get("workspace_url") or item.get("url") or "").strip()
+        profile_dir_raw = str(item.get("profile_dir") or "").strip()
+        members_url = str(item.get("members_url") or "").strip() or None
+        max_users = _coerce_int(item.get("max_users"), default_max_users, field_name="max_users")
+        enabled = _coerce_bool(item.get("enabled", item.get("active")), True)
+        if not workspace_url:
+            raise RuntimeError(f"ChatGPT workspace '{workspace_id}' is missing workspace_url")
+        workspaces.append(
+            ChatGPTWorkspaceConfig(
+                id=workspace_id,
+                name=name,
+                workspace_url=workspace_url,
+                profile_dir=_resolve_path(profile_dir_raw) if profile_dir_raw else default_profile_dir,
+                members_url=members_url,
+                max_users=max_users,
+                enabled=enabled,
+            )
+        )
+    return workspaces
+
+
 @dataclass(slots=True)
 class Settings:
     bot_token: str
@@ -41,35 +139,25 @@ class Settings:
     about_url: str
     review_url: str
     required_channel: str
-    payment_provider_token: str = ""
     default_language: str = "ru"
     admin_language: str = "ru"
     trial_duration_days: int = 3
     payment_window_hours: int = 12
-    http_host: str = "0.0.0.0"
-    http_port: int = 8080
-    checkout_public_base_url: str = ""
-    multicard_base_url: str = "https://dev-mesh.multicard.uz"
-    multicard_app_id: str = "rhmt_test"
-    multicard_secret: str = "Pw18axeBFo8V7NamKHXX"
-    multicard_store_id: int = 6
-    multicard_callback_url: str = "https://subnowa-checkout.railway.app/callback"
-    multicard_return_url: str = "https://subnowa-checkout.railway.app/return"
-    multicard_allowed_ip: str = "195.158.26.90"
+    chatgpt_workspaces: list[ChatGPTWorkspaceConfig] | None = None
+    chatgpt_workspace_member_limit: int = 5
+    playwright_profile_dir: Path = BASE_DIR / "automation" / "auth_state" / "chrome_profile"
+    playwright_headless: bool = True
+    playwright_navigation_timeout_ms: int = 25000
+    playwright_action_timeout_ms: int = 12000
+    playwright_retry_attempts: int = 3
 
     @property
     def polling_lock_path(self) -> Path:
         return BASE_DIR / ".polling.lock"
 
     @property
-    def checkout_entry_base_url(self) -> str:
-        value = (self.checkout_public_base_url or "").strip()
-        if value:
-            return value.rstrip("/")
-        parsed = urlsplit(self.multicard_return_url)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
-        return ""
+    def automation_auth_state_dir(self) -> Path:
+        return BASE_DIR / "automation" / "auth_state"
 
 
 def load_settings() -> Settings:
@@ -83,6 +171,9 @@ def load_settings() -> Settings:
     if not database_url:
         raise RuntimeError("DATABASE_URL is required")
 
+    chatgpt_workspace_member_limit = int(os.getenv("CHATGPT_WORKSPACE_MEMBER_LIMIT", "5"))
+    playwright_profile_dir = _default_playwright_profile_dir()
+
     return Settings(
         bot_token=bot_token,
         database_url=database_url,
@@ -91,19 +182,19 @@ def load_settings() -> Settings:
         about_url=os.getenv("ABOUT_URL", "https://subnowa.site").strip(),
         review_url=os.getenv("REVIEW_URL", "https://t.me/subbowaotzib").strip(),
         required_channel=os.getenv("REQUIRED_CHANNEL", "@UZB_TREND_MUCIQALAR_BASS_HIT").strip(),
-        payment_provider_token=os.getenv("PAYMENT_PROVIDER_TOKEN", "").strip(),
         default_language=os.getenv("DEFAULT_LANGUAGE", "ru").strip() or "ru",
         admin_language="ru",
         trial_duration_days=int(os.getenv("TRIAL_DURATION_DAYS", "3")),
         payment_window_hours=int(os.getenv("PAYMENT_WINDOW_HOURS", "12")),
-        http_host=os.getenv("HTTP_HOST", "0.0.0.0").strip() or "0.0.0.0",
-        http_port=int(os.getenv("PORT") or os.getenv("HTTP_PORT") or "8080"),
-        checkout_public_base_url=os.getenv("CHECKOUT_PUBLIC_BASE_URL", "").strip(),
-        multicard_base_url=os.getenv("MULTICARD_BASE_URL", "https://dev-mesh.multicard.uz").strip().rstrip("/"),
-        multicard_app_id=os.getenv("MULTICARD_APP_ID", "rhmt_test").strip(),
-        multicard_secret=os.getenv("MULTICARD_SECRET", "Pw18axeBFo8V7NamKHXX").strip(),
-        multicard_store_id=int(os.getenv("MULTICARD_STORE_ID", "6")),
-        multicard_callback_url=os.getenv("MULTICARD_CALLBACK_URL", "https://subnowa-checkout.railway.app/callback").strip(),
-        multicard_return_url=os.getenv("MULTICARD_RETURN_URL", "https://subnowa-checkout.railway.app/return").strip(),
-        multicard_allowed_ip=os.getenv("MULTICARD_ALLOWED_IP", "195.158.26.90").strip() or "195.158.26.90",
+        chatgpt_workspaces=_parse_chatgpt_workspaces(
+            os.getenv("CHATGPT_WORKSPACES_JSON"),
+            default_profile_dir=playwright_profile_dir,
+            default_max_users=chatgpt_workspace_member_limit,
+        ),
+        chatgpt_workspace_member_limit=chatgpt_workspace_member_limit,
+        playwright_profile_dir=playwright_profile_dir,
+        playwright_headless=_parse_bool(os.getenv("PLAYWRIGHT_HEADLESS"), True),
+        playwright_navigation_timeout_ms=int(os.getenv("PLAYWRIGHT_NAVIGATION_TIMEOUT_MS", "25000")),
+        playwright_action_timeout_ms=int(os.getenv("PLAYWRIGHT_ACTION_TIMEOUT_MS", "12000")),
+        playwright_retry_attempts=int(os.getenv("PLAYWRIGHT_RETRY_ATTEMPTS", "3")),
     )

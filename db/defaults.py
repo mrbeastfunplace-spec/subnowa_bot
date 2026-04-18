@@ -71,77 +71,41 @@ DEFAULT_PRODUCTS = [
         "translations": {
             Language.RU.value: {
                 "name": "CapCut Pro",
-                "description": (
-                    "💠 Товар: CapCut Pro (1 месяц)\n"
-                    "💰 Стоимость: 49,000 сум (~350 ₽)\n"
-                    "—————————————————-\n"
-                    "⚙️ Как проходит подключение\n"
-                    " 1. Мы отправляем вам готовый аккаунт который создается после заказа\n"
-                    " 2. Вы скопируете эти данные ввиде(login,parol) и вставляете capcut\n"
-                    " 3. если у вас есть аккаунт то сначала вам нужно выйти и зайти способом\n"
-                    "&lt;&lt;войти через почту&gt;&gt;\n"
-                    "⏱ Срок действия — 30 дней с момента активации\n\n"
-                    "🔐 Безопасность\n"
-                    "— Без вылетов\n"
-                    "— Вход осуществляется только вами\n"
-                    "— Используются официальные методы подключения\n\n"
-                    "— Поддержка на всех этапах подключения 💬\n"
-                    "— Доступно для пользователей из СНГ и других стран\n"
-                    "⸻\n"
-                    "✅ Преимущества\n"
-                    "✔️ Быстрое подключение\n"
-                    "✔️ Прозрачные условия\n"
-                    "✔️ Сопровождение после покупки"
-                ),
+                "description": "CapCut Pro на 1 месяц.\n\nПосле подтверждения оплаты бот автоматически выдаёт логин и пароль.",
             },
             Language.UZ.value: {
                 "name": "CapCut Pro",
-                "description": (
-                    "💠 Mahsulot: CapCut Pro (1 oy)\n"
-                    "💰 Narxi: 49,000 so‘m (~350 ₽)\n"
-                    "—————————————————-\n"
-                    "⚙️ Qanday ulanadi\n"
-                    "1. Buyurtmadan so‘ng sizga tayyor akkaunt yuboriladi\n"
-                    "2. Siz ushbu ma’lumotlarni (login, parol) nusxalab CapCut ga kiritasiz\n"
-                    "3. Agar sizda akkaunt bo‘lsa, avval undan chiqib, &lt;&gt; usuli bilan qayta kiring\n"
-                    "⏱ Faol muddati — faollashtirilgan vaqtdan boshlab 30 kun\n\n"
-                    "🔐 Xavfsizlik\n"
-                    "— Uzilishlarsiz\n"
-                    "— Kirish faqat siz tomonidan amalga oshiriladi\n"
-                    "— Rasmiy ulanish usullari ishlatiladi\n\n"
-                    "— Ulanishning barcha bosqichlarida yordam 💬\n"
-                    "— MDH va boshqa davlatlar foydalanuvchilari uchun mavjud\n"
-                    "⸻\n"
-                    "✅ Afzalliklar\n"
-                    "✔️ Tez ulanish\n"
-                    "✔️ Shaffof shartlar\n"
-                    "✔️ Xariddan keyingi yordam"
-                ),
+                "description": "1 oylik CapCut Pro.\n\nTo'lov tasdiqlangach bot login va parolni avtomatik beradi.",
             },
             Language.EN.value: {
                 "name": "CapCut Pro",
-                "description": (
-                    "💠 Product: CapCut Pro (1 month)\n"
-                    "💰 Price: 49,000 UZS (~350 ₽)\n"
-                    "—————————————————-\n"
-                    "⚙️ How connection works\n"
-                    "1. We send you a ready account created after the order\n"
-                    "2. You copy these details (login, password) and paste them into CapCut\n"
-                    "3. If you already have an account, first log out and then sign in using\n"
-                    "&lt;&gt;\n"
-                    "⏱ Duration — 30 days from activation\n\n"
-                    "🔐 Security\n"
-                    "— No crashes\n"
-                    "— Only you can access it\n"
-                    "— Official connection methods are used\n\n"
-                    "— Support at every connection step 💬\n"
-                    "— Available for users from CIS and other countries\n"
-                    "⸻\n"
-                    "✅ Advantages\n"
-                    "✔️ Fast connection\n"
-                    "✔️ Transparent terms\n"
-                    "✔️ Support after purchase"
-                ),
+                "description": "CapCut Pro for 1 month.\n\nAfter payment confirmation the bot automatically delivers login and password.",
+            },
+        },
+    },
+    {
+        "code": "capcut_personal_month",
+        "category_code": "saas",
+        "status": ProductStatus.ACTIVE.value,
+        "delivery_type": "manual",
+        "workflow_type": "manual",
+        "price": "79000.00",
+        "currency": "UZS",
+        "sort_order": 21,
+        "show_in_catalog": False,
+        "extra_data": {"variant": "capcut_personal"},
+        "translations": {
+            Language.RU.value: {
+                "name": "CapCut Pro — Личный аккаунт",
+                "description": "Личный аккаунт CapCut Pro на 30 дней.",
+            },
+            Language.UZ.value: {
+                "name": "CapCut Pro — Shaxsiy akkaunt",
+                "description": "30 kunlik shaxsiy CapCut Pro akkaunti.",
+            },
+            Language.EN.value: {
+                "name": "CapCut Pro — Personal account",
+                "description": "Personal CapCut Pro account for 30 days.",
             },
         },
     },

@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 bot.db
 .polling.lock
+# automation/auth_state/

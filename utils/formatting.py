@@ -36,6 +36,13 @@ STATUS_LABELS = {
     },
 }
 
+STATUS_LABELS["ru"][OrderStatus.WAITING.value] = "Ожидает места"
+STATUS_LABELS["ru"][OrderStatus.FAILED.value] = "Ошибка"
+STATUS_LABELS["uz"][OrderStatus.WAITING.value] = "Navbatda"
+STATUS_LABELS["uz"][OrderStatus.FAILED.value] = "Xato"
+STATUS_LABELS["en"][OrderStatus.WAITING.value] = "Waiting"
+STATUS_LABELS["en"][OrderStatus.FAILED.value] = "Failed"
+
 TASHKENT_TZ = timezone(timedelta(hours=5))
 
 ORDER_DURATION_DAYS = {
@@ -43,6 +50,8 @@ ORDER_DURATION_DAYS = {
     "capcut_pro_month": 30,
     "chatgpt_trial_3d": 3,
 }
+
+ORDER_DURATION_DAYS["capcut_personal_month"] = 30
 
 ORDER_DURATION_LABELS = {
     "ru": {
@@ -61,6 +70,10 @@ ORDER_DURATION_LABELS = {
         "chatgpt_trial_3d": "3 days",
     },
 }
+
+ORDER_DURATION_LABELS["ru"]["capcut_personal_month"] = "30 дней"
+ORDER_DURATION_LABELS["uz"]["capcut_personal_month"] = "30 kun"
+ORDER_DURATION_LABELS["en"]["capcut_personal_month"] = "30 days"
 
 
 def format_money(value: Decimal | str | int | float, currency: str) -> str:

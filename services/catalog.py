@@ -30,13 +30,10 @@ def product_price_line(product: Product) -> str:
 
 
 def render_product_text(product: Product, language: str) -> str:
-    description = product_description(product, language)
-    if product.code == "capcut_pro_month" and description:
-        return description
-
     price_label = "Цена" if language == "ru" else ("Narx" if language == "uz" else "Price")
     delivery_label = "Выдача" if language == "ru" else ("Yetkazish" if language == "uz" else "Delivery")
     lines = [f"<b>{product_name(product, language)}</b>"]
+    description = product_description(product, language)
     if description:
         lines.append("")
         lines.append(description)

@@ -41,6 +41,13 @@ REQUIRED_CHANNEL=@your_channel
 DEFAULT_LANGUAGE=ru
 TRIAL_DURATION_DAYS=3
 PAYMENT_WINDOW_HOURS=12
+CHATGPT_WORKSPACES_JSON=[{"id":"workspace_1","name":"Workspace 1","workspace_url":"https://chatgpt.com/admin/workspace-1","members_url":"https://chatgpt.com/admin/workspace-1/members","profile_dir":"automation/auth_state/chrome_profile","max_users":5,"enabled":true}]
+CHATGPT_WORKSPACE_MEMBER_LIMIT=5
+PLAYWRIGHT_PROFILE_DIR=/data/chrome_profile
+PLAYWRIGHT_HEADLESS=true
+PLAYWRIGHT_NAVIGATION_TIMEOUT_MS=25000
+PLAYWRIGHT_ACTION_TIMEOUT_MS=12000
+PLAYWRIGHT_RETRY_ATTEMPTS=3
 ```
 
 ## Как подключить PostgreSQL
@@ -94,4 +101,5 @@ python app.py
 
 ```bash
 pip install -r requirements.txt
+playwright install chromium
 ```
