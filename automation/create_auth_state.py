@@ -3,7 +3,8 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-PROFILE_DIR = Path(os.getenv("PLAYWRIGHT_PROFILE_DIR", "automation/auth_state/chrome_profile"))
+BASE_DIR = Path(__file__).resolve().parent
+PROFILE_DIR = BASE_DIR / "auth_state" / "chrome_profile"
 
 os.makedirs(PROFILE_DIR, exist_ok=True)
 
