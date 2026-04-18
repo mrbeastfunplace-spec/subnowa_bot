@@ -3,4 +3,4 @@ __pycache__/
 *.pyc
 bot.db
 .polling.lock
-# automation/auth_state/
+automation/auth_state/chrome_profile/
