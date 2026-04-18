@@ -88,6 +88,23 @@ def _default_playwright_profile_dir() -> Path:
     return BASE_DIR / "automation" / "auth_state" / "chrome_profile"
 
 
+def _default_chatgpt_workspaces(
+    *,
+    default_profile_dir: Path,
+    default_max_users: int,
+) -> list[ChatGPTWorkspaceConfig]:
+    return [
+        ChatGPTWorkspaceConfig(
+            id="main",
+            name="main",
+            workspace_url="https://chatgpt.com/",
+            profile_dir=default_profile_dir,
+            max_users=max(1, default_max_users),
+            enabled=True,
+        )
+    ]
+
+
 def _parse_chatgpt_workspaces(
     value: str | None,
     *,
@@ -95,13 +112,21 @@ def _parse_chatgpt_workspaces(
     default_max_users: int,
 ) -> list[ChatGPTWorkspaceConfig]:
     if not value:
-        return []
+        return _default_chatgpt_workspaces(
+            default_profile_dir=default_profile_dir,
+            default_max_users=default_max_users,
+        )
     try:
         payload = json.loads(value)
     except json.JSONDecodeError as exc:
         raise RuntimeError("CHATGPT_WORKSPACES_JSON must be a valid JSON array") from exc
     if not isinstance(payload, list):
         raise RuntimeError("CHATGPT_WORKSPACES_JSON must be a JSON array")
+    if not payload:
+        return _default_chatgpt_workspaces(
+            default_profile_dir=default_profile_dir,
+            default_max_users=default_max_users,
+        )
 
     workspaces: list[ChatGPTWorkspaceConfig] = []
     for index, item in enumerate(payload, start=1):
