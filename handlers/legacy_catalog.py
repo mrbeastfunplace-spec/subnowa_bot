@@ -8,9 +8,12 @@ import re
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from sqlalchemy import select
 
-from db.base import CheckoutSessionStatus, OrderStatus
+from db.base import BalanceTransactionType, CheckoutSessionStatus, OrderStatus
+from db.models import BalanceTransaction
 from handlers.common import insufficient_balance_markup, profile_markup, purchase_confirmation_markup
+from services.balance import credit_balance
 from services.catalog import get_product, get_product_by_code, product_type_label, service_name
 from services.checkout import cancel_checkout_session, claim_checkout_processing, create_checkout_session, get_checkout_session
 from services.context import AppContext
@@ -52,6 +55,10 @@ EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", re.IGNORECASE)
 CARD_NUMBER = "9860100126034816"
 USDT_TRC20_ADDRESS = "TUr3m7sAWpiysQs5S1jQkbxcvJARqAD8Rs"
 CLICK_QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "media" / "click.png.jpg"
+PROMO_CODE_SUBNOWAPRO = "subnowapro"
+PROMO_CODE_SUBNOWAPRO_SOURCE = "promo_code"
+PROMO_CODE_SUBNOWAPRO_SOURCE_ID = 1
+PROMO_CODE_SUBNOWAPRO_BONUS = Decimal("20000.00")
 
 
 def _is_valid_gmail(value: str) -> bool:
@@ -87,6 +94,46 @@ async def _notify_admins(bot: Bot, app: AppContext, text: str, order_id: int | N
 
 def _sum_text(value: Decimal | int | float | str) -> str:
     return format_money(value, "сум").replace(" сум", "") + " сум"
+
+
+def _promo_purchase_markup(language: str) -> InlineKeyboardMarkup:
+    button_text = "🛍 Перейти к покупкам"
+    if language == "uz":
+        button_text = "🛍 Xaridlarga o'tish"
+    elif language == "en":
+        button_text = "🛍 Go to products"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=button_text, callback_data="menu:catalog", style="success")]]
+    )
+
+
+def _promo_success_text(language: str, new_balance) -> str:
+    balance_text = _sum_text(new_balance)
+    if language == "uz":
+        return (
+            "✅ Promokod faollashtirildi\n\n"
+            "💰 Balansingizga 20 000 so'm qo'shildi\n"
+            f"💳 Yangi balans: {balance_text}"
+        )
+    if language == "en":
+        return (
+            "✅ Promo code activated\n\n"
+            "💰 20 000 UZS has been added to your balance\n"
+            f"💳 New balance: {balance_text}"
+        )
+    return (
+        "✅ Промокод активирован\n\n"
+        "💰 На ваш баланс зачислено: 20 000 сум\n"
+        f"💳 Ваш новый баланс: {balance_text}"
+    )
+
+
+def _promo_already_used_text(language: str) -> str:
+    if language == "uz":
+        return "⚠️ Bu promokod sizning akkauntingizda allaqachon faollashtirilgan."
+    if language == "en":
+        return "⚠️ This promo code has already been activated on your account."
+    return "⚠️ Этот промокод уже был активирован на вашем аккаунте."
 
 
 def _chatgpt_variant_markup(language: str, personal_product, ready_product) -> InlineKeyboardMarkup:
@@ -895,9 +942,39 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def promo_code_handler(message: Message, state: FSMContext) -> None:
         data = await state.get_data()
         return_to = data.get("promo_return", "profile")
+        promo_code = (message.text or "").strip().lower()
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
+            user = await get_user_by_telegram_id(session, message.from_user.id)
             await state.clear()
+            if user is not None and promo_code == PROMO_CODE_SUBNOWAPRO:
+                existing_tx_id = await session.scalar(
+                    select(BalanceTransaction.id).where(
+                        BalanceTransaction.user_id == user.id,
+                        BalanceTransaction.source == PROMO_CODE_SUBNOWAPRO_SOURCE,
+                        BalanceTransaction.source_id == PROMO_CODE_SUBNOWAPRO_SOURCE_ID,
+                    )
+                )
+                if existing_tx_id is not None:
+                    await message.answer(
+                        _promo_already_used_text(language),
+                        reply_markup=_promo_purchase_markup(language),
+                    )
+                    return
+                transaction = await credit_balance(
+                    session,
+                    user_id=user.id,
+                    amount=PROMO_CODE_SUBNOWAPRO_BONUS,
+                    tx_type=BalanceTransactionType.ADMIN_ADJUSTMENT,
+                    source=PROMO_CODE_SUBNOWAPRO_SOURCE,
+                    source_id=PROMO_CODE_SUBNOWAPRO_SOURCE_ID,
+                )
+                await session.commit()
+                await message.answer(
+                    _promo_success_text(language, transaction.balance_after),
+                    reply_markup=_promo_purchase_markup(language),
+                )
+                return
             await message.answer("К сожалению, такого промокода не существует.")
             if return_to == "profile":
                 display_name = escape(user_display_name(message.from_user, message.from_user.id))
