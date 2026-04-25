@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from decimal import Decimal
 from html import escape
+from pathlib import Path
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from handlers.common import (
     order_detail_markup,
@@ -36,6 +37,7 @@ def _to_decimal(value: Decimal | int | float | str) -> Decimal:
 
 
 MIN_TOPUP_AMOUNT = Decimal("80000.00")
+CLICK_QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "media" / "click.png.jpg"
 
 
 def _money_unit(language: str) -> str:
@@ -315,6 +317,57 @@ def _topup_payment_text(language: str, payment_name: str, amount: Decimal | int 
         f"Сумма: {amount_text}\n\n"
         f"{instruction}\n\n"
         "После оплаты отправьте чек или скриншот сюда."
+    )
+
+
+def _topup_payment_method_name(method_code: str, fallback: str, language: str) -> str:
+    normalized = (method_code or "").strip().lower()
+    if normalized == "click":
+        return "Click"
+    if normalized == "card":
+        return "Humo / Uzcard"
+    if normalized == "usdt_trc20":
+        if language == "uz":
+            return "Kriptovalyuta"
+        if language == "en":
+            return "Cryptocurrency"
+        return "Криптовалюта"
+    return fallback
+
+
+def _topup_click_text(language: str, amount: Decimal | int | str) -> str:
+    amount_text = _sum_text(amount, language)
+    if language == "uz":
+        return (
+            "<b>💳 Click orqali to'lov</b>\n\n"
+            f"Summa: {amount_text}\n\n"
+            "To'lov uchun:\n"
+            "1. Click ilovasini oching\n"
+            "2. QR kodni skaner qiling\n"
+            f"3. {amount_text} summani kiriting\n"
+            "4. To'lovni tasdiqlang\n\n"
+            "To'lovdan keyin chekni ushbu botga yuboring."
+        )
+    if language == "en":
+        return (
+            "<b>💳 Payment via Click</b>\n\n"
+            f"Amount: {amount_text}\n\n"
+            "To pay:\n"
+            "1. Open Click\n"
+            "2. Scan the QR code\n"
+            f"3. Enter the amount {amount_text}\n"
+            "4. Confirm the payment\n\n"
+            "After payment, send the receipt to this bot."
+        )
+    return (
+        "<b>💳 Оплата через Click</b>\n\n"
+        f"Сумма: {amount_text}\n\n"
+        "Для оплаты:\n"
+        "1. Откройте Click\n"
+        "2. Отсканируйте Qrcod\n"
+        f"3. Ведите сумму {amount_text}\n"
+        "4. Подтвердите оплату\n\n"
+        "После оплаты отправьте чек в этот бот."
     )
 
 
@@ -801,10 +854,27 @@ def build_profile_router(app: AppContext, bot: Bot) -> Router:
                 await callback.answer(error_text, show_alert=True)
                 return
             instruction = payment_instruction(payment_method, language)
-            payment_name = payment_title(payment_method, language)
+            payment_name = _topup_payment_method_name(
+                method_code,
+                payment_title(payment_method, language),
+                language,
+            )
         await state.set_state(UserFlowState.waiting_topup_receipt)
         await state.update_data(topup_amount=amount_value, topup_method=method_code)
         await callback.answer()
+        if method_code == "click" and CLICK_QR_IMAGE_PATH.exists():
+            if callback.message is not None:
+                try:
+                    await callback.message.delete()
+                except Exception:
+                    pass
+            await bot.send_photo(
+                callback.from_user.id,
+                photo=FSInputFile(str(CLICK_QR_IMAGE_PATH)),
+                caption=_topup_click_text(language, amount_value),
+                reply_markup=_topup_receipt_markup_local(language, amount_value),
+            )
+            return
         await answer_or_edit(
             callback,
             _topup_payment_text(language, payment_name, amount_value, instruction),
@@ -965,7 +1035,11 @@ async def _handle_topup_receipt(
             receipt_file_type=file_type,
         )
         await session.commit()
-        payment_name = payment_title(payment_method, language)
+        payment_name = _topup_payment_method_name(
+            payment_method.code,
+            payment_title(payment_method, language),
+            language,
+        )
 
     await state.clear()
     await message.answer(
