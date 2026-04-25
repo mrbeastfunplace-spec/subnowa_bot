@@ -15,8 +15,14 @@ _WORKSPACE_ID_PATTERN = re.compile(r"^workspace_(\d+)$")
 
 
 def ensure_workspace_directories(settings: Settings) -> None:
+    settings.playwright_profile_root.mkdir(parents=True, exist_ok=True)
     settings.playwright_storage_state_dir.mkdir(parents=True, exist_ok=True)
     settings.playwright_onboarding_profile_root.mkdir(parents=True, exist_ok=True)
+
+
+def profile_dir(settings: Settings, workspace_id: str) -> Path:
+    ensure_workspace_directories(settings)
+    return settings.playwright_profile_root / workspace_id
 
 
 def storage_state_path(settings: Settings, workspace_id: str) -> Path:
@@ -33,6 +39,25 @@ def short_storage_reference(path: str | Path | None) -> str:
     if not path:
         return "-"
     return Path(path).name
+
+
+def workspace_profile_path(workspace: ChatGPTWorkspace) -> Path | None:
+    profile_dir_value = (workspace.profile_dir or "").strip()
+    if not profile_dir_value:
+        return None
+    return Path(profile_dir_value)
+
+
+def workspace_profile_ready(path: Path | None) -> bool:
+    if path is None or not path.exists() or not path.is_dir():
+        return False
+    try:
+        next(path.iterdir())
+    except StopIteration:
+        return False
+    except OSError:
+        return False
+    return True
 
 
 def workspace_status_label(status: ChatGPTWorkspaceStatus) -> str:
@@ -80,9 +105,10 @@ async def create_pending_workspace(
     record = ChatGPTWorkspace(
         workspace_id=code,
         workspace_name=code,
-        workspace_url="https://chatgpt.com/",
-        storage_state_path=str(storage_state_path(settings, code)),
-        temp_profile_dir=str(onboarding_profile_dir(settings, code)),
+        workspace_url="https://chatgpt.com/admin",
+        profile_dir=str(profile_dir(settings, code)),
+        storage_state_path="",
+        temp_profile_dir=None,
         status=ChatGPTWorkspaceStatus.PENDING_SETUP,
         max_users=max(1, settings.chatgpt_workspace_member_limit),
         created_by_admin_telegram_id=created_by_admin_telegram_id,
@@ -98,7 +124,8 @@ def as_config(workspace: ChatGPTWorkspace) -> ChatGPTWorkspaceConfig:
         id=workspace.workspace_id,
         name=workspace.workspace_name or workspace.workspace_id,
         workspace_url=workspace.workspace_url,
-        storage_state_path=Path(workspace.storage_state_path),
+        profile_dir=workspace_profile_path(workspace),
+        storage_state_path=None,
         members_url=workspace.members_url,
         max_users=max(1, workspace.max_users or 1),
         enabled=workspace.status == ChatGPTWorkspaceStatus.ACTIVE,
@@ -112,22 +139,15 @@ async def list_active_workspace_configs(
     settings: Settings,
 ) -> list[ChatGPTWorkspaceConfig]:
     configs: list[ChatGPTWorkspaceConfig] = []
-    seen_ids: set[str] = set()
 
     registry_workspaces = await session.scalars(
         select(ChatGPTWorkspace).where(ChatGPTWorkspace.status == ChatGPTWorkspaceStatus.ACTIVE)
     )
     for workspace in registry_workspaces:
         config = as_config(workspace)
-        configs.append(config)
-        seen_ids.add(config.id)
-
-    for workspace in settings.chatgpt_workspaces or []:
-        if workspace.id in seen_ids or not workspace.enabled:
+        if config.profile_dir is None:
             continue
-        configs.append(workspace)
-        seen_ids.add(workspace.id)
-
+        configs.append(config)
     return configs
 
 
@@ -165,9 +185,9 @@ async def set_workspace_enabled(
     enabled: bool,
 ) -> ChatGPTWorkspace:
     if enabled:
-        path = Path(workspace.storage_state_path)
+        path = workspace_profile_path(workspace)
         workspace.status = (
-            ChatGPTWorkspaceStatus.ACTIVE if path.exists() else ChatGPTWorkspaceStatus.INVALID_AUTH
+            ChatGPTWorkspaceStatus.ACTIVE if workspace_profile_ready(path) else ChatGPTWorkspaceStatus.INVALID_AUTH
         )
     else:
         workspace.status = ChatGPTWorkspaceStatus.DISABLED

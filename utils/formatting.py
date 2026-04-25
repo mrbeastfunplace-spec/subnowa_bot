@@ -11,19 +11,25 @@ STATUS_LABELS = {
         OrderStatus.PENDING_PAYMENT.value: "Ожидает оплаты",
         OrderStatus.WAITING_CHECK.value: "На проверке",
         OrderStatus.PAID.value: "Оплачен",
-        OrderStatus.PROCESSING.value: "В работе",
-        OrderStatus.COMPLETED.value: "Завершён",
-        OrderStatus.REJECTED.value: "Отклонён",
-        OrderStatus.CANCELLED.value: "Отменён",
+        OrderStatus.PROCESSING.value: "В обработке",
+        OrderStatus.COMPLETED.value: "Выполнен",
+        OrderStatus.REJECTED.value: "Отклонен",
+        OrderStatus.CANCELLED.value: "Отменен",
+        OrderStatus.REFUNDED.value: "Возвращен",
+        OrderStatus.WAITING.value: "Ожидает места",
+        OrderStatus.FAILED.value: "Ошибка",
     },
     "uz": {
         OrderStatus.PENDING_PAYMENT.value: "To'lov kutilmoqda",
         OrderStatus.WAITING_CHECK.value: "Tekshiruvda",
         OrderStatus.PAID.value: "To'langan",
         OrderStatus.PROCESSING.value: "Jarayonda",
-        OrderStatus.COMPLETED.value: "Yakunlangan",
+        OrderStatus.COMPLETED.value: "Bajarilgan",
         OrderStatus.REJECTED.value: "Rad etilgan",
         OrderStatus.CANCELLED.value: "Bekor qilingan",
+        OrderStatus.REFUNDED.value: "Qaytarilgan",
+        OrderStatus.WAITING.value: "Navbatda",
+        OrderStatus.FAILED.value: "Xato",
     },
     "en": {
         OrderStatus.PENDING_PAYMENT.value: "Pending payment",
@@ -33,47 +39,45 @@ STATUS_LABELS = {
         OrderStatus.COMPLETED.value: "Completed",
         OrderStatus.REJECTED.value: "Rejected",
         OrderStatus.CANCELLED.value: "Cancelled",
+        OrderStatus.REFUNDED.value: "Refunded",
+        OrderStatus.WAITING.value: "Waiting",
+        OrderStatus.FAILED.value: "Failed",
     },
 }
-
-STATUS_LABELS["ru"][OrderStatus.WAITING.value] = "Ожидает места"
-STATUS_LABELS["ru"][OrderStatus.FAILED.value] = "Ошибка"
-STATUS_LABELS["uz"][OrderStatus.WAITING.value] = "Navbatda"
-STATUS_LABELS["uz"][OrderStatus.FAILED.value] = "Xato"
-STATUS_LABELS["en"][OrderStatus.WAITING.value] = "Waiting"
-STATUS_LABELS["en"][OrderStatus.FAILED.value] = "Failed"
 
 TASHKENT_TZ = timezone(timedelta(hours=5))
 
 ORDER_DURATION_DAYS = {
     "chatgpt_plus_month": 30,
+    "chatgpt_ready_month": 30,
     "capcut_pro_month": 30,
+    "capcut_personal_month": 30,
     "chatgpt_trial_3d": 3,
 }
 
-ORDER_DURATION_DAYS["capcut_personal_month"] = 30
-
 ORDER_DURATION_LABELS = {
     "ru": {
-        "chatgpt_plus_month": "25-30 дней",
+        "chatgpt_plus_month": "30 дней",
+        "chatgpt_ready_month": "30 дней",
         "capcut_pro_month": "30 дней",
+        "capcut_personal_month": "30 дней",
         "chatgpt_trial_3d": "3 дня",
     },
     "uz": {
-        "chatgpt_plus_month": "25-30 kun",
+        "chatgpt_plus_month": "30 kun",
+        "chatgpt_ready_month": "30 kun",
         "capcut_pro_month": "30 kun",
+        "capcut_personal_month": "30 kun",
         "chatgpt_trial_3d": "3 kun",
     },
     "en": {
-        "chatgpt_plus_month": "25-30 days",
+        "chatgpt_plus_month": "30 days",
+        "chatgpt_ready_month": "30 days",
         "capcut_pro_month": "30 days",
+        "capcut_personal_month": "30 days",
         "chatgpt_trial_3d": "3 days",
     },
 }
-
-ORDER_DURATION_LABELS["ru"]["capcut_personal_month"] = "30 дней"
-ORDER_DURATION_LABELS["uz"]["capcut_personal_month"] = "30 kun"
-ORDER_DURATION_LABELS["en"]["capcut_personal_month"] = "30 days"
 
 
 def format_money(value: Decimal | str | int | float, currency: str) -> str:

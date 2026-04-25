@@ -42,7 +42,7 @@ async def main() -> None:
     dp.include_router(build_admin_workspace_router(app, bot))
     dp.include_router(build_admin_broadcast_router(app, bot))
     dp.include_router(build_catalog_router(app, bot))
-    dp.include_router(build_profile_router(app))
+    dp.include_router(build_profile_router(app, bot))
     dp.include_router(build_start_router(app, bot))
 
     try:

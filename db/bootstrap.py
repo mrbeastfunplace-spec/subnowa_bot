@@ -8,12 +8,15 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from config import Settings
-from db.base import ButtonActionType, Language, PaymentProviderType, ProductStatus
+from db.base import ButtonActionType, InventoryStatus, Language, PaymentProviderType, ProductStatus
 from db.defaults import DEFAULT_CATEGORIES, DEFAULT_LAYOUTS, DEFAULT_PRODUCTS, DEFAULT_TEXTS, get_default_payment_methods, get_default_settings
 from db.models import (
     Base,
+    CapCutAccount,
     Category,
     CategoryTranslation,
+    ChatGPTWorkspace,
+    InventoryItem,
     Layout,
     LayoutButton,
     LayoutButtonTranslation,
@@ -245,21 +248,133 @@ async def initialize_database(
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_factory() as session:
-        await ensure_runtime_schema(session)
+        await ensure_runtime_schema(session, settings)
         await seed_settings(session, settings)
         await seed_categories(session)
         await normalize_category_slugs(session)
         await seed_products(session)
+        await ensure_commerce_products(session)
         await seed_payment_methods(session)
         await seed_texts(session)
         await seed_layouts(session, settings)
         await ensure_admin_shortcuts(session)
         await sync_legacy_ui_once(session, settings)
         await seed_product_payment_links(session)
+        await migrate_legacy_capcut_inventory(session)
         await session.commit()
 
 
-async def ensure_runtime_schema(session: AsyncSession) -> None:
+async def ensure_runtime_schema(session: AsyncSession, settings: Settings) -> None:
+    await _ensure_column(
+        session,
+        "users",
+        "first_name",
+        {
+            "postgresql": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "sqlite": "TEXT NOT NULL DEFAULT ''",
+            "default": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    await _ensure_column(
+        session,
+        "users",
+        "balance",
+        {
+            "postgresql": "NUMERIC(12, 2) NOT NULL DEFAULT 0",
+            "sqlite": "NUMERIC(12, 2) NOT NULL DEFAULT 0",
+            "default": "NUMERIC(12, 2) NOT NULL DEFAULT 0",
+        },
+    )
+    await _ensure_column(
+        session,
+        "users",
+        "is_blocked",
+        {
+            "postgresql": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "sqlite": "BOOLEAN NOT NULL DEFAULT 0",
+            "default": "BOOLEAN NOT NULL DEFAULT 0",
+        },
+    )
+    await _ensure_column(
+        session,
+        "products",
+        "service_name",
+        {
+            "postgresql": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "sqlite": "TEXT NOT NULL DEFAULT ''",
+            "default": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    await _ensure_column(
+        session,
+        "products",
+        "product_type",
+        {
+            "postgresql": "VARCHAR(64) NOT NULL DEFAULT 'default'",
+            "sqlite": "TEXT NOT NULL DEFAULT 'default'",
+            "default": "TEXT NOT NULL DEFAULT 'default'",
+        },
+    )
+    await _ensure_column(
+        session,
+        "orders",
+        "service_name_snapshot",
+        {
+            "postgresql": "VARCHAR(255) NOT NULL DEFAULT ''",
+            "sqlite": "TEXT NOT NULL DEFAULT ''",
+            "default": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    await _ensure_column(
+        session,
+        "orders",
+        "product_type_snapshot",
+        {
+            "postgresql": "VARCHAR(64) NOT NULL DEFAULT ''",
+            "sqlite": "TEXT NOT NULL DEFAULT ''",
+            "default": "TEXT NOT NULL DEFAULT ''",
+        },
+    )
+    await _ensure_column(
+        session,
+        "orders",
+        "paid_at",
+        {
+            "postgresql": "TIMESTAMP WITH TIME ZONE",
+            "sqlite": "DATETIME",
+            "default": "DATETIME",
+        },
+    )
+    await _ensure_column(
+        session,
+        "orders",
+        "refunded_at",
+        {
+            "postgresql": "TIMESTAMP WITH TIME ZONE",
+            "sqlite": "DATETIME",
+            "default": "DATETIME",
+        },
+    )
+    await _ensure_column(
+        session,
+        "orders",
+        "admin_id",
+        {
+            "postgresql": "BIGINT",
+            "sqlite": "BIGINT",
+            "default": "BIGINT",
+        },
+    )
+    await _ensure_column(
+        session,
+        "orders",
+        "delivery_content",
+        {
+            "postgresql": "TEXT",
+            "sqlite": "TEXT",
+            "default": "TEXT",
+        },
+    )
     await _ensure_column(
         session,
         "orders",
@@ -270,6 +385,25 @@ async def ensure_runtime_schema(session: AsyncSession) -> None:
             "default": "DATETIME",
         },
     )
+    await _ensure_column(
+        session,
+        "chatgpt_workspaces",
+        "profile_dir",
+        {
+            "postgresql": "TEXT",
+            "sqlite": "TEXT",
+            "default": "TEXT",
+        },
+    )
+    await _ensure_workspace_profile_dirs(session, settings)
+
+
+async def _ensure_workspace_profile_dirs(session: AsyncSession, settings: Settings) -> None:
+    workspaces = (await session.scalars(select(ChatGPTWorkspace))).all()
+    for workspace in workspaces:
+        if (workspace.profile_dir or "").strip():
+            continue
+        workspace.profile_dir = str(settings.playwright_profile_root / workspace.workspace_id)
 
 
 async def _ensure_column(session: AsyncSession, table_name: str, column_name: str, ddl_type: str | dict[str, str]) -> None:
@@ -377,6 +511,230 @@ async def seed_products(session: AsyncSession) -> None:
                 translation.name = payload["name"]
             if not translation.description:
                 translation.description = payload["description"]
+
+
+async def ensure_commerce_products(session: AsyncSession) -> None:
+    categories = {row.code: row for row in (await session.scalars(select(Category))).all()}
+    products = {row.code: row for row in (await session.scalars(select(Product))).all()}
+
+    definitions = [
+        {
+            "code": "chatgpt_plus_month",
+            "category_code": "saas",
+            "service_name": "ChatGPT Pro",
+            "product_type": "personal_account",
+            "workflow_type": "chatgpt_manual",
+            "delivery_type": "manual",
+            "show_in_catalog": True,
+            "sort_order": 10,
+            "default_price": Decimal("79000.00"),
+            "replace_prices": {Decimal("99000.00")},
+            "extra_data": {
+                "collect_gmail": True,
+                "requires_subscription_check": True,
+                "variant_group": "chatgpt_pro",
+            },
+            "translations": {
+                "ru": {
+                    "name": "ChatGPT Pro",
+                    "description": "Подписка ChatGPT Pro с подключением на ваш личный аккаунт.",
+                },
+                "uz": {
+                    "name": "ChatGPT Pro",
+                    "description": "ChatGPT Pro obunasini shaxsiy akkauntingizga ulab beramiz.",
+                },
+                "en": {
+                    "name": "ChatGPT Pro",
+                    "description": "ChatGPT Pro subscription connected to your personal account.",
+                },
+            },
+        },
+        {
+            "code": "chatgpt_ready_month",
+            "category_code": "saas",
+            "service_name": "ChatGPT Pro",
+            "product_type": "ready_access",
+            "workflow_type": "inventory_auto",
+            "delivery_type": "auto",
+            "show_in_catalog": False,
+            "sort_order": 11,
+            "default_price": Decimal("49000.00"),
+            "replace_prices": set(),
+            "extra_data": {
+                "variant_group": "chatgpt_pro",
+                "inventory_enabled": True,
+            },
+            "translations": {
+                "ru": {
+                    "name": "ChatGPT Pro — Готовый аккаунт",
+                    "description": "Готовый доступ ChatGPT Pro с моментальной выдачей после оплаты.",
+                },
+                "uz": {
+                    "name": "ChatGPT Pro — Tayyor akkaunt",
+                    "description": "To'lovdan keyin darhol beriladigan tayyor ChatGPT Pro akkaunti.",
+                },
+                "en": {
+                    "name": "ChatGPT Pro — Ready account",
+                    "description": "Ready-to-use ChatGPT Pro access delivered right after payment.",
+                },
+            },
+        },
+        {
+            "code": "capcut_pro_month",
+            "category_code": "saas",
+            "service_name": "CapCut Pro",
+            "product_type": "ready_access",
+            "workflow_type": "inventory_auto",
+            "delivery_type": "auto",
+            "show_in_catalog": True,
+            "sort_order": 20,
+            "default_price": Decimal("49000.00"),
+            "replace_prices": set(),
+            "extra_data": {
+                "variant_group": "capcut_pro",
+                "inventory_enabled": True,
+            },
+            "translations": {
+                "ru": {
+                    "name": "CapCut Pro",
+                    "description": "CapCut Pro с автоматической выдачей готового доступа.",
+                },
+                "uz": {
+                    "name": "CapCut Pro",
+                    "description": "Tayyor kirish bilan avtomatik beriladigan CapCut Pro.",
+                },
+                "en": {
+                    "name": "CapCut Pro",
+                    "description": "CapCut Pro with instant ready-access delivery.",
+                },
+            },
+        },
+        {
+            "code": "capcut_personal_month",
+            "category_code": "saas",
+            "service_name": "CapCut Pro",
+            "product_type": "personal_account",
+            "workflow_type": "manual",
+            "delivery_type": "manual",
+            "show_in_catalog": False,
+            "sort_order": 21,
+            "default_price": Decimal("79000.00"),
+            "replace_prices": set(),
+            "extra_data": {
+                "variant_group": "capcut_pro",
+            },
+            "translations": {
+                "ru": {
+                    "name": "CapCut Pro — Личный аккаунт",
+                    "description": "Подключение CapCut Pro на ваш личный аккаунт.",
+                },
+                "uz": {
+                    "name": "CapCut Pro — Shaxsiy akkaunt",
+                    "description": "CapCut Pro obunasini shaxsiy akkauntingizga ulab beramiz.",
+                },
+                "en": {
+                    "name": "CapCut Pro — Personal account",
+                    "description": "CapCut Pro subscription connected to your personal account.",
+                },
+            },
+        },
+        {
+            "code": "grok_template",
+            "category_code": "saas",
+            "service_name": "Grok",
+            "product_type": "personal_account",
+            "workflow_type": "manual",
+            "delivery_type": "manual",
+            "show_in_catalog": True,
+            "sort_order": 40,
+            "default_price": Decimal("0.00"),
+            "replace_prices": set(),
+            "extra_data": {},
+            "translations": {},
+        },
+        {
+            "code": "adobe_template",
+            "category_code": "saas",
+            "service_name": "Adobe",
+            "product_type": "personal_account",
+            "workflow_type": "manual",
+            "delivery_type": "manual",
+            "show_in_catalog": True,
+            "sort_order": 50,
+            "default_price": Decimal("0.00"),
+            "replace_prices": set(),
+            "extra_data": {},
+            "translations": {},
+        },
+    ]
+
+    for item in definitions:
+        product = products.get(item["code"])
+        if product is None:
+            product = Product(code=item["code"])
+            session.add(product)
+            products[item["code"]] = product
+
+        product.category = categories.get(item["category_code"])
+        product.service_name = item["service_name"]
+        product.product_type = item["product_type"]
+        product.workflow_type = item["workflow_type"]
+        product.delivery_type = item["delivery_type"]
+        product.currency = product.currency or "UZS"
+        product.sort_order = item["sort_order"]
+        product.show_in_catalog = item["show_in_catalog"]
+
+        current_price = Decimal(str(product.price or 0))
+        if product.id is None or current_price in item["replace_prices"] or current_price <= 0:
+            product.price = item["default_price"]
+
+        merged_extra = dict(product.extra_data or {})
+        merged_extra.update(item["extra_data"])
+        product.extra_data = merged_extra
+
+        existing = {tr.language.value: tr for tr in product.translations}
+        for lang_code, payload in item["translations"].items():
+            translation = existing.get(lang_code)
+            if translation is None:
+                translation = ProductTranslation(product=product, language=Language(lang_code))
+                session.add(translation)
+            if not translation.name:
+                translation.name = payload["name"]
+            if not translation.description:
+                translation.description = payload["description"]
+
+
+async def migrate_legacy_capcut_inventory(session: AsyncSession) -> None:
+    product = await session.scalar(select(Product).where(Product.code == "capcut_pro_month"))
+    if product is None:
+        return
+
+    existing_legacy_ids = {
+        item_id
+        for item_id in (
+            await session.scalars(
+                select(InventoryItem.legacy_capcut_account_id).where(InventoryItem.legacy_capcut_account_id.is_not(None))
+            )
+        ).all()
+        if item_id is not None
+    }
+    legacy_accounts = (await session.scalars(select(CapCutAccount))).all()
+    for account in legacy_accounts:
+        if account.id in existing_legacy_ids:
+            continue
+        item = InventoryItem(
+            product_id=product.id,
+            title="CapCut Pro",
+            content=f"Логин: {account.login}\nПароль: {account.password}",
+            instruction="Если у вас уже открыт другой аккаунт CapCut, сначала выйдите из него, затем войдите по этим данным.",
+            status=InventoryStatus.SOLD if account.is_used else InventoryStatus.AVAILABLE,
+            created_at=account.created_at,
+            sold_to_user_id=account.issued_to_user_id,
+            sold_order_id=account.issued_order_id,
+            sold_at=account.issued_at,
+            legacy_capcut_account_id=account.id,
+        )
+        session.add(item)
 
 
 async def seed_payment_methods(session: AsyncSession) -> None:
@@ -488,12 +846,38 @@ async def seed_layouts(session: AsyncSession, settings: Settings, force_codes: s
 
 
 async def ensure_admin_shortcuts(session: AsyncSession) -> None:
-    layout = await session.scalar(select(Layout).where(Layout.code == "admin_main"))
-    if layout is None:
+    layout_id = await session.scalar(select(Layout.id).where(Layout.code == "admin_main"))
+    if layout_id is None:
         return
 
-    existing_buttons = {button.code: button for button in layout.buttons}
+    existing_buttons = {
+        button.code: button
+        for button in (
+            await session.scalars(select(LayoutButton).where(LayoutButton.layout_id == layout_id))
+        ).all()
+    }
     desired_buttons = [
+        {
+            "code": "topups",
+            "action_value": "admin:topups",
+            "row_index": 0,
+            "sort_order": 15,
+            "text": "Заявки на пополнение",
+        },
+        {
+            "code": "inventory",
+            "action_value": "admin:inventory",
+            "row_index": 2,
+            "sort_order": 15,
+            "text": "Готовые доступы",
+        },
+        {
+            "code": "users",
+            "action_value": "admin:users",
+            "row_index": 3,
+            "sort_order": 15,
+            "text": "Пользователи",
+        },
         {
             "code": "chatgpt_accounts",
             "action_value": "admin:chatgpt_accounts",
@@ -514,7 +898,7 @@ async def ensure_admin_shortcuts(session: AsyncSession) -> None:
         button = existing_buttons.get(item["code"])
         if button is None:
             button = LayoutButton(
-                layout=layout,
+                layout_id=layout_id,
                 code=item["code"],
                 action_type=ButtonActionType.CALLBACK,
                 action_value=item["action_value"],
@@ -525,10 +909,15 @@ async def ensure_admin_shortcuts(session: AsyncSession) -> None:
             )
             session.add(button)
             await session.flush()
-        existing_translations = {translation.language.value: translation for translation in button.translations}
-        translation = existing_translations.get(Language.RU.value)
+            existing_buttons[item["code"]] = button
+        translation = await session.scalar(
+            select(LayoutButtonTranslation).where(
+                LayoutButtonTranslation.button_id == button.id,
+                LayoutButtonTranslation.language == Language.RU,
+            )
+        )
         if translation is None:
-            translation = LayoutButtonTranslation(button=button, language=Language.RU, text=item["text"])
+            translation = LayoutButtonTranslation(button_id=button.id, language=Language.RU, text=item["text"])
             session.add(translation)
         elif not translation.text:
             translation.text = item["text"]
@@ -560,6 +949,7 @@ async def seed_product_payment_links(session: AsyncSession) -> None:
 
     link_map = {
         "chatgpt_plus_month": ["click", "card", "usdt_trc20"],
+        "chatgpt_ready_month": ["click", "card", "usdt_trc20"],
         "capcut_pro_month": ["click", "card", "usdt_trc20"],
         "capcut_personal_month": ["click", "card"],
         "grok_template": ["click", "card", "usdt_trc20"],

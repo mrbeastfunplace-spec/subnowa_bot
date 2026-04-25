@@ -35,6 +35,7 @@ class OrderStatus(str, Enum):
     FAILED = "failed"
     REJECTED = "rejected"
     CANCELLED = "cancelled"
+    REFUNDED = "refunded"
 
 
 class PaymentProviderType(str, Enum):
@@ -71,4 +72,31 @@ class BroadcastStatus(str, Enum):
     DRAFT = "draft"
     SENT = "sent"
     FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class TopupStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class InventoryStatus(str, Enum):
+    AVAILABLE = "available"
+    RESERVED = "reserved"
+    SOLD = "sold"
+    DELETED = "deleted"
+
+
+class BalanceTransactionType(str, Enum):
+    TOPUP = "topup"
+    PURCHASE = "purchase"
+    REFUND = "refund"
+    ADMIN_ADJUSTMENT = "admin_adjustment"
+
+
+class CheckoutSessionStatus(str, Enum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
     CANCELLED = "cancelled"

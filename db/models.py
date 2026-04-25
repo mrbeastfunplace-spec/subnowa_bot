@@ -8,15 +8,19 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from db.base import (
     Base,
+    BalanceTransactionType,
     BroadcastButtonType,
     BroadcastKind,
     BroadcastStatus,
     ButtonActionType,
     ChatGPTWorkspaceStatus,
+    CheckoutSessionStatus,
+    InventoryStatus,
     Language,
     OrderStatus,
     PaymentProviderType,
     ProductStatus,
+    TopupStatus,
     utcnow,
 )
 
@@ -30,6 +34,10 @@ enum_workspace_status = Enum(ChatGPTWorkspaceStatus, native_enum=False, length=3
 enum_broadcast_kind = Enum(BroadcastKind, native_enum=False, length=16)
 enum_broadcast_button_type = Enum(BroadcastButtonType, native_enum=False, length=32)
 enum_broadcast_status = Enum(BroadcastStatus, native_enum=False, length=16)
+enum_topup_status = Enum(TopupStatus, native_enum=False, length=16)
+enum_inventory_status = Enum(InventoryStatus, native_enum=False, length=16)
+enum_balance_transaction_type = Enum(BalanceTransactionType, native_enum=False, length=32)
+enum_checkout_session_status = Enum(CheckoutSessionStatus, native_enum=False, length=16)
 
 
 class User(Base):
@@ -38,13 +46,19 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    first_name: Mapped[str] = mapped_column(String(255), default="")
     full_name: Mapped[str] = mapped_column(String(255), default="")
+    balance: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    is_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     language: Mapped[Language] = mapped_column(enum_language, default=Language.RU)
     language_selected: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
     last_seen_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     orders: Mapped[list["Order"]] = relationship(back_populates="user", lazy="selectin")
+    topups: Mapped[list["Topup"]] = relationship(back_populates="user", lazy="selectin")
+    balance_transactions: Mapped[list["BalanceTransaction"]] = relationship(back_populates="user", lazy="selectin")
+    checkout_sessions: Mapped[list["CheckoutSession"]] = relationship(back_populates="user", lazy="selectin")
 
 
 class Category(Base):
@@ -80,6 +94,8 @@ class Product(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    service_name: Mapped[str] = mapped_column(String(255), default="")
+    product_type: Mapped[str] = mapped_column(String(64), default="default")
     category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
     status: Mapped[ProductStatus] = mapped_column(enum_product_status, default=ProductStatus.ACTIVE)
     delivery_type: Mapped[str] = mapped_column(String(32), default="manual")
@@ -97,6 +113,8 @@ class Product(Base):
     translations: Mapped[list["ProductTranslation"]] = relationship(back_populates="product", cascade="all, delete-orphan", lazy="selectin")
     payment_links: Mapped[list["ProductPaymentMethod"]] = relationship(back_populates="product", cascade="all, delete-orphan", lazy="selectin")
     orders: Mapped[list["Order"]] = relationship(back_populates="product", lazy="selectin")
+    inventory_items: Mapped[list["InventoryItem"]] = relationship(back_populates="product", lazy="selectin")
+    checkout_sessions: Mapped[list["CheckoutSession"]] = relationship(back_populates="product", lazy="selectin")
 
 
 class ProductTranslation(Base):
@@ -248,6 +266,7 @@ class ChatGPTWorkspace(Base):
     label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     workspace_url: Mapped[str] = mapped_column(Text, default="https://chatgpt.com/")
     members_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_dir: Mapped[str] = mapped_column(Text, default="")
     storage_state_path: Mapped[str] = mapped_column(Text, default="")
     temp_profile_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ChatGPTWorkspaceStatus] = mapped_column(enum_workspace_status, default=ChatGPTWorkspaceStatus.PENDING_SETUP, index=True)
@@ -290,6 +309,8 @@ class Order(Base):
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)
     payment_method_id: Mapped[int | None] = mapped_column(ForeignKey("payment_methods.id", ondelete="SET NULL"), nullable=True)
     product_code_snapshot: Mapped[str] = mapped_column(String(64), default="")
+    service_name_snapshot: Mapped[str] = mapped_column(String(255), default="")
+    product_type_snapshot: Mapped[str] = mapped_column(String(64), default="")
     product_name_snapshot: Mapped[str] = mapped_column(String(255), default="")
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
     currency: Mapped[str] = mapped_column(String(8), default="UZS")
@@ -301,16 +322,21 @@ class Order(Base):
     details: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     payment_proof_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     payment_proof_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    paid_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
     completed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    refunded_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    admin_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    delivery_content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="orders", lazy="selectin")
     product: Mapped["Product | None"] = relationship(back_populates="orders", lazy="selectin")
     payment_method: Mapped["PaymentMethod | None"] = relationship(back_populates="orders", lazy="selectin")
     history: Mapped[list["OrderStatusHistory"]] = relationship(back_populates="order", cascade="all, delete-orphan", lazy="selectin")
     capcut_account: Mapped["CapCutAccount | None"] = relationship(back_populates="issued_order", lazy="selectin")
+    inventory_item: Mapped["InventoryItem | None"] = relationship(back_populates="sold_order", lazy="selectin")
 
 
 class OrderStatusHistory(Base):
@@ -325,6 +351,78 @@ class OrderStatusHistory(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     order: Mapped["Order"] = relationship(back_populates="history", lazy="selectin")
+
+
+class Topup(Base):
+    __tablename__ = "topups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    payment_method: Mapped[str] = mapped_column(String(64), default="")
+    status: Mapped[TopupStatus] = mapped_column(enum_topup_status, default=TopupStatus.PENDING, index=True)
+    receipt_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    receipt_file_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    approved_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    admin_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="topups", lazy="selectin")
+
+
+class InventoryItem(Base):
+    __tablename__ = "inventory"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(255), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[InventoryStatus] = mapped_column(enum_inventory_status, default=InventoryStatus.AVAILABLE, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    sold_to_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    sold_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), nullable=True, unique=True)
+    sold_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    legacy_capcut_account_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True)
+
+    product: Mapped["Product"] = relationship(back_populates="inventory_items", lazy="selectin")
+    sold_order: Mapped["Order | None"] = relationship(back_populates="inventory_item", lazy="selectin")
+
+
+class BalanceTransaction(Base):
+    __tablename__ = "balance_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    type: Mapped[BalanceTransactionType] = mapped_column(enum_balance_transaction_type, index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    balance_before: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    user: Mapped["User"] = relationship(back_populates="balance_transactions", lazy="selectin")
+
+
+class CheckoutSession(Base):
+    __tablename__ = "checkout_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    balance_before: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(12, 2), default=Decimal("0.00"))
+    status: Mapped[CheckoutSessionStatus] = mapped_column(enum_checkout_session_status, default=CheckoutSessionStatus.PENDING, index=True)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    processed_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped["User"] = relationship(back_populates="checkout_sessions", lazy="selectin")
+    product: Mapped["Product"] = relationship(back_populates="checkout_sessions", lazy="selectin")
 
 
 class CapCutAccount(Base):

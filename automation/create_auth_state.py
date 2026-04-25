@@ -1,27 +1,22 @@
+from playwright.sync_api import sync_playwright
 import os
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright
-
-BASE_DIR = Path(__file__).resolve().parent
-PROFILE_DIR = BASE_DIR / "auth_state" / "chrome_profile"
-
+PROFILE_DIR = Path("automation/auth_state/chrome_profiles/manual")
 os.makedirs(PROFILE_DIR, exist_ok=True)
 
 with sync_playwright() as p:
-    print("Используется профиль:", PROFILE_DIR)
     context = p.chromium.launch_persistent_context(
         str(PROFILE_DIR),
         headless=False,
-        viewport={"width": 1366, "height": 900},
+        channel="chrome",  # важно
         args=["--disable-blink-features=AutomationControlled"]
     )
 
     page = context.new_page()
     page.goto("https://chatgpt.com/", wait_until="domcontentloaded")
 
-    print("Войди в аккаунт вручную. После полного входа нажми Enter в терминале.")
+    print("Войди в аккаунт и нажми Enter")
     input()
 
-    print("Профиль сохранён в:", PROFILE_DIR)
     context.close()

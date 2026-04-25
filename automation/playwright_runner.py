@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -17,7 +17,6 @@ from automation.selectors import (
     MEMBER_ROW_SELECTORS,
     MEMBER_SECTION_SELECTORS,
     MEMBERS_NAV_SELECTORS,
-    PENDING_ROW_SELECTORS,
     SUCCESS_MESSAGE_SELECTORS,
 )
 from config import ChatGPTWorkspaceConfig, Settings
@@ -31,6 +30,7 @@ PlaywrightResultStatus = Literal[
     "profile_not_found",
     "auth_failed",
     "invite_failed",
+    "anti_bot_blocked",
     "unexpected_error",
 ]
 
@@ -49,6 +49,9 @@ class PlaywrightInviteResult:
     workspace_name: str | None = None
     member_count: int | None = None
     error_message: str | None = None
+    current_url: str | None = None
+    page_title: str | None = None
+    screenshot_path: str | None = None
 
 
 @dataclass(slots=True)
@@ -60,6 +63,16 @@ class PlaywrightWorkspaceValidationResult:
     workspace_url: str | None = None
     members_url: str | None = None
     error_message: str | None = None
+    current_url: str | None = None
+    page_title: str | None = None
+    screenshot_path: str | None = None
+
+
+@dataclass(slots=True)
+class _PageDiagnostics:
+    current_url: str
+    title: str
+    screenshot_path: str | None = None
 
 
 class _AuthFailedError(Exception):
@@ -86,12 +99,21 @@ class _InviteFailedError(Exception):
     pass
 
 
+class _AntiBotBlockedError(Exception):
+    def __init__(self, diagnostics: _PageDiagnostics) -> None:
+        super().__init__("Cloudflare anti-bot page detected")
+        self.diagnostics = diagnostics
+
+
 def _result(
     status: PlaywrightResultStatus,
     workspace: ChatGPTWorkspaceConfig,
     *,
     member_count: int | None = None,
     error_message: str | None = None,
+    current_url: str | None = None,
+    page_title: str | None = None,
+    screenshot_path: str | None = None,
 ) -> PlaywrightInviteResult:
     return PlaywrightInviteResult(
         status=status,
@@ -99,7 +121,47 @@ def _result(
         workspace_name=workspace.name,
         member_count=member_count,
         error_message=error_message,
+        current_url=current_url,
+        page_title=page_title,
+        screenshot_path=screenshot_path,
     )
+
+
+def _validation_result(
+    status: PlaywrightWorkspaceValidationStatus,
+    workspace: ChatGPTWorkspaceConfig,
+    *,
+    workspace_name: str | None = None,
+    member_count: int | None = None,
+    workspace_url: str | None = None,
+    members_url: str | None = None,
+    error_message: str | None = None,
+    current_url: str | None = None,
+    page_title: str | None = None,
+    screenshot_path: str | None = None,
+) -> PlaywrightWorkspaceValidationResult:
+    return PlaywrightWorkspaceValidationResult(
+        status=status,
+        workspace_id=workspace.id,
+        workspace_name=workspace_name or workspace.name,
+        member_count=member_count,
+        workspace_url=workspace_url or workspace.workspace_url,
+        members_url=members_url or workspace.members_url,
+        error_message=error_message,
+        current_url=current_url,
+        page_title=page_title,
+        screenshot_path=screenshot_path,
+    )
+
+
+def _diagnostics_summary(diagnostics: _PageDiagnostics) -> str:
+    details = [
+        f"Current URL: {diagnostics.current_url}.",
+        f"Page title: {diagnostics.title}.",
+    ]
+    if diagnostics.screenshot_path:
+        details.append(f"Screenshot: {diagnostics.screenshot_path}.")
+    return " ".join(details)
 
 
 async def _locator_text(locator) -> str:
@@ -138,22 +200,6 @@ async def _wait_for_any(locators: tuple, timeout: int, *, error_message: str):
         except Exception as exc:
             last_error = exc
     raise _TransientInviteError(error_message) from last_error
-
-
-async def _click_first(page, selectors: tuple[str, ...], timeout: int) -> None:
-    locator = await _wait_for_first(page, selectors, timeout)
-    try:
-        await locator.click(timeout=timeout)
-    except Exception as exc:
-        raise _TransientInviteError("Click action failed") from exc
-
-
-async def _fill_first(page, selectors: tuple[str, ...], value: str, timeout: int) -> None:
-    locator = await _wait_for_first(page, selectors, timeout)
-    try:
-        await locator.fill(value, timeout=timeout)
-    except Exception as exc:
-        raise _TransientInviteError("Failed to fill invite email") from exc
 
 
 def _invite_entry_locators(page) -> tuple:
@@ -203,11 +249,83 @@ async def _resolve_invite_root(page, timeout: int):
         return page.locator("body").first
 
 
-async def _open_invite_panel(page, settings: Settings) -> None:
+async def _capture_page_diagnostics(
+    page,
+    workspace: ChatGPTWorkspaceConfig,
+    settings: Settings,
+    logger,
+    *,
+    label: str,
+) -> _PageDiagnostics:
+    current_url = page.url or "-"
+    try:
+        title = (await page.title()).strip() or "-"
+    except Exception:
+        title = "-"
+
+    settings.playwright_debug_dir.mkdir(parents=True, exist_ok=True)
+    safe_workspace = re.sub(r"[^a-zA-Z0-9_.-]+", "_", workspace.id or "workspace")
+    safe_label = re.sub(r"[^a-zA-Z0-9_.-]+", "_", label)
+    screenshot_path = settings.playwright_debug_dir / f"{safe_workspace}_{safe_label}_{int(time.time() * 1000)}.png"
+    screenshot_saved = False
+    try:
+        await page.screenshot(path=str(screenshot_path), full_page=True)
+        screenshot_saved = True
+    except Exception as exc:
+        logger.warning(
+            "Failed to capture Playwright screenshot | workspace=%s label=%s error=%s",
+            workspace.id,
+            label,
+            exc,
+        )
+
+    final_path = str(screenshot_path) if screenshot_saved else None
+    logger.error(
+        "Playwright diagnostics | workspace=%s label=%s url=%s title=%s screenshot=%s",
+        workspace.id,
+        label,
+        current_url,
+        title,
+        final_path or "not-saved",
+    )
+    return _PageDiagnostics(
+        current_url=current_url,
+        title=title,
+        screenshot_path=final_path,
+    )
+
+
+async def _raise_if_anti_bot_blocked(
+    page,
+    workspace: ChatGPTWorkspaceConfig,
+    settings: Settings,
+    logger,
+    *,
+    label: str,
+) -> None:
+    try:
+        title = (await page.title()).strip()
+    except Exception:
+        return
+    if title.lower() != "just a moment...":
+        return
+    diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label=label)
+    raise _AntiBotBlockedError(diagnostics)
+
+
+async def _open_invite_panel(
+    page,
+    settings: Settings,
+    workspace: ChatGPTWorkspaceConfig,
+    logger,
+    *,
+    label: str,
+) -> None:
     timeout = settings.playwright_action_timeout_ms
     last_error: Exception | None = None
     for attempt in range(1, 3):
         await _wait_for_network_idle(page)
+        await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label=f"{label}_ready_{attempt}")
         try:
             root = await _resolve_invite_root(page, timeout)
             await _wait_for_any(
@@ -227,6 +345,7 @@ async def _open_invite_panel(page, settings: Settings) -> None:
             )
             await invite_button.click(timeout=timeout)
             await _wait_for_network_idle(page, delay_ms=2_000)
+            await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label=f"{label}_opened_{attempt}")
             root = await _resolve_invite_root(page, timeout)
             await _wait_for_any(
                 _invite_email_input_locators(root),
@@ -266,41 +385,6 @@ async def _submit_invite(page, timeout: int) -> None:
         await locator.click(timeout=timeout)
     except Exception as exc:
         raise _TransientInviteError("Failed to submit invite") from exc
-
-
-async def _capture_page_diagnostics(page, workspace: ChatGPTWorkspaceConfig, logger, *, label: str) -> str:
-    current_url = page.url or "-"
-    try:
-        title = (await page.title()).strip() or "-"
-    except Exception:
-        title = "-"
-
-    screenshot_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", workspace.id or "workspace")
-    screenshot_path = Path(tempfile.gettempdir()) / f"playwright_error_{screenshot_name}.png"
-    screenshot_saved = False
-    try:
-        await page.screenshot(path=str(screenshot_path), full_page=True)
-        screenshot_saved = True
-    except Exception as exc:
-        logger.warning(
-            "Failed to capture Playwright screenshot | workspace=%s label=%s error=%s",
-            workspace.id,
-            label,
-            exc,
-        )
-
-    logger.error(
-        "Playwright diagnostics | workspace=%s label=%s url=%s title=%s screenshot=%s",
-        workspace.id,
-        label,
-        current_url,
-        title,
-        screenshot_path if screenshot_saved else "not-saved",
-    )
-    details = f"Current URL: {current_url}. Page title: {title}."
-    if screenshot_saved:
-        details += f" Screenshot: {screenshot_path}."
-    return details
 
 
 async def _contains_email(page, email: str) -> bool:
@@ -346,9 +430,18 @@ async def _is_auth_required(page) -> bool:
     return False
 
 
-async def _ensure_invite_flow_ready(page, settings: Settings) -> None:
+async def _ensure_invite_flow_ready(
+    page,
+    settings: Settings,
+    workspace: ChatGPTWorkspaceConfig,
+    logger,
+    *,
+    label: str,
+) -> None:
     await _wait_for_network_idle(page)
-    await _open_invite_panel(page, settings)
+    await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label=f"{label}_before_invite")
+    await _open_invite_panel(page, settings, workspace, logger, label=label)
+    await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label=f"{label}_after_invite")
 
 
 async def _extract_member_count(page) -> int | None:
@@ -387,33 +480,16 @@ async def _wait_for_success(page, timeout: int, email: str) -> bool:
 
 
 def _workspace_auth_artifact_exists(workspace: ChatGPTWorkspaceConfig) -> bool:
-    if workspace.storage_state_path is not None:
-        return workspace.storage_state_path.exists()
-    if workspace.profile_dir is not None:
-        return workspace.profile_dir.exists()
-    return False
-
-
-async def _persist_workspace_auth_state(context, workspace: ChatGPTWorkspaceConfig) -> None:
-    if workspace.storage_state_path is None:
-        return
-    workspace.storage_state_path.parent.mkdir(parents=True, exist_ok=True)
-    await context.storage_state(path=str(workspace.storage_state_path))
+    if workspace.profile_dir is None:
+        return False
+    return workspace.profile_dir.exists() and workspace.profile_dir.is_dir()
 
 
 async def _open_workspace_context(playwright, workspace: ChatGPTWorkspaceConfig, settings: Settings, *, headless: bool):
-    args = ["--disable-blink-features=AutomationControlled"]
-    if workspace.storage_state_path is not None:
-        browser = await playwright.chromium.launch(headless=headless, args=args)
-        storage_state = str(workspace.storage_state_path) if workspace.storage_state_path.exists() else None
-        context = await browser.new_context(storage_state=storage_state)
-        context.set_default_timeout(settings.playwright_action_timeout_ms)
-        context.set_default_navigation_timeout(settings.playwright_navigation_timeout_ms)
-        return context, browser
-
     if workspace.profile_dir is None:
-        raise _TransientInviteError("Workspace does not have a profile_dir or storage_state_path configured")
+        raise _TransientInviteError("Workspace does not have a profile_dir configured")
 
+    args = ["--disable-blink-features=AutomationControlled"]
     context = await playwright.chromium.launch_persistent_context(
         str(workspace.profile_dir),
         headless=headless,
@@ -431,6 +507,9 @@ async def _close_workspace_context(context, browser) -> None:
 
 
 async def _workspace_page(context):
+    for page in context.pages:
+        if (page.url or "").strip() not in {"", "about:blank"}:
+            return page
     return context.pages[0] if context.pages else await context.new_page()
 
 
@@ -440,6 +519,55 @@ def _derive_workspace_url(members_url: str | None, fallback: str) -> str:
     if members_url:
         return members_url
     return fallback
+
+
+def _normalize_url(url: str | None) -> str:
+    return (url or "").strip().rstrip("/")
+
+
+def _is_workspace_url(url: str | None) -> bool:
+    lower = _normalize_url(url).lower()
+    return "/admin/" in lower or lower.endswith("/admin") or "/members" in lower
+
+
+def _target_workspace_url(workspace: ChatGPTWorkspaceConfig) -> str:
+    return workspace.members_url or workspace.workspace_url
+
+
+def _page_matches_workspace(page_url: str | None, workspace: ChatGPTWorkspaceConfig) -> bool:
+    current_url = _normalize_url(page_url)
+    target_url = _normalize_url(_target_workspace_url(workspace))
+    if current_url and target_url:
+        if current_url == target_url or current_url.startswith(target_url + "/"):
+            return True
+    if _is_workspace_url(current_url) and not _is_workspace_url(target_url):
+        return True
+    return False
+
+
+async def _ensure_workspace_page_ready(
+    page,
+    workspace: ChatGPTWorkspaceConfig,
+    settings: Settings,
+    logger,
+    *,
+    label: str,
+) -> None:
+    await _wait_for_network_idle(page, delay_ms=1000)
+    await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label=f"{label}_existing_page")
+    if _page_matches_workspace(page.url, workspace):
+        return
+
+    target_url = _target_workspace_url(workspace)
+    if not target_url or not target_url.startswith("http"):
+        raise _TransientInviteError("Workspace URL is not configured")
+
+    try:
+        await page.goto(target_url, wait_until="domcontentloaded")
+        await _wait_for_network_idle(page)
+    except Exception as exc:
+        raise _TransientInviteError("Workspace page did not load") from exc
+    await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label=f"{label}_after_goto")
 
 
 async def _extract_workspace_name(page, workspace: ChatGPTWorkspaceConfig) -> str:
@@ -459,27 +587,6 @@ async def _extract_workspace_name(page, workspace: ChatGPTWorkspaceConfig) -> st
     return workspace.name
 
 
-def _validation_result(
-    status: PlaywrightWorkspaceValidationStatus,
-    workspace: ChatGPTWorkspaceConfig,
-    *,
-    workspace_name: str | None = None,
-    member_count: int | None = None,
-    workspace_url: str | None = None,
-    members_url: str | None = None,
-    error_message: str | None = None,
-) -> PlaywrightWorkspaceValidationResult:
-    return PlaywrightWorkspaceValidationResult(
-        status=status,
-        workspace_id=workspace.id,
-        workspace_name=workspace_name or workspace.name,
-        member_count=member_count,
-        workspace_url=workspace_url or workspace.workspace_url,
-        members_url=members_url or workspace.members_url,
-        error_message=error_message,
-    )
-
-
 async def _run_once(workspace: ChatGPTWorkspaceConfig, email: str, settings: Settings) -> PlaywrightInviteResult:
     try:
         from playwright.async_api import async_playwright
@@ -488,27 +595,26 @@ async def _run_once(workspace: ChatGPTWorkspaceConfig, email: str, settings: Set
 
     logger = get_logger("automation.playwright")
     logger.info(
-        "Using Playwright workspace auth artifact | workspace=%s profile_dir=%s storage_state=%s",
+        "Using Playwright workspace profile | workspace=%s profile_dir=%s members_url=%s workspace_url=%s",
         workspace.id,
         workspace.profile_dir,
-        workspace.storage_state_path,
+        workspace.members_url,
+        workspace.workspace_url,
     )
     if not _workspace_auth_artifact_exists(workspace):
         return _result(
             "profile_not_found",
             workspace,
-            error_message=(
-                f"Workspace auth artifact was not found. "
-                f"profile_dir={workspace.profile_dir} storage_state={workspace.storage_state_path}"
-            ),
+            error_message=f"Workspace profile dir was not found: profile_dir={workspace.profile_dir}",
         )
 
     async with async_playwright() as playwright:
         logger.info(
-            "Launching Playwright workspace context | workspace=%s profile_dir=%s storage_state=%s",
+            "Launching Playwright workspace context | workspace=%s profile_dir=%s members_url=%s workspace_url=%s",
             workspace.id,
             workspace.profile_dir,
-            workspace.storage_state_path,
+            workspace.members_url,
+            workspace.workspace_url,
         )
         context, browser = await _open_workspace_context(
             playwright,
@@ -518,18 +624,13 @@ async def _run_once(workspace: ChatGPTWorkspaceConfig, email: str, settings: Set
         )
         page = await _workspace_page(context)
         try:
-            await page.goto(workspace.workspace_url, wait_until="domcontentloaded")
-            await _wait_for_network_idle(page)
-        except Exception as exc:
-            raise _TransientInviteError("Workspace page did not load") from exc
-
-        try:
+            await _ensure_workspace_page_ready(page, workspace, settings, logger, label="invite_open")
             if await _is_auth_required(page):
                 raise _AuthFailedError("Persistent profile is no longer authenticated")
 
-            await _ensure_invite_flow_ready(page, settings)
+            await _ensure_invite_flow_ready(page, settings, workspace, logger, label="invite_panel")
             if await _is_auth_required(page):
-                raise _AuthFailedError("workspace redirected to auth page")
+                raise _AuthFailedError("Workspace redirected to auth page")
 
             member_count = await _extract_member_count(page)
             if member_count is not None and member_count >= workspace.max_users:
@@ -539,30 +640,31 @@ async def _run_once(workspace: ChatGPTWorkspaceConfig, email: str, settings: Set
                 raise _DuplicateInviteError("Email is already present in workspace", member_count=member_count)
 
             await _fill_invite_email(page, email, settings.playwright_action_timeout_ms)
-
             if await _has_duplicate_hint(page):
                 raise _DuplicateInviteError("Email was already invited", member_count=member_count)
 
             await _submit_invite(page, settings.playwright_action_timeout_ms)
+            await _raise_if_anti_bot_blocked(page, workspace, settings, logger, label="invite_after_submit")
             if not await _wait_for_success(page, settings.playwright_action_timeout_ms, email):
                 raise _InviteFailedError("Invite success confirmation was not detected")
-            await _persist_workspace_auth_state(context, workspace)
             return _result("invited", workspace, member_count=member_count)
         except (_DuplicateInviteError, _WorkspaceFullError):
             raise
         except _AuthFailedError as exc:
-            diagnostics = await _capture_page_diagnostics(page, workspace, logger, label="auth_failed")
-            raise _AuthFailedError(f"{exc}. {diagnostics}") from exc
+            diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label="auth_failed")
+            raise _AuthFailedError(f"{exc}. {_diagnostics_summary(diagnostics)}") from exc
         except _InviteFailedError as exc:
-            diagnostics = await _capture_page_diagnostics(page, workspace, logger, label="invite_failed")
-            raise _InviteFailedError(f"{exc}. {diagnostics}") from exc
+            diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label="invite_failed")
+            raise _InviteFailedError(f"{exc}. {_diagnostics_summary(diagnostics)}") from exc
         except _TransientInviteError as exc:
-            diagnostics = await _capture_page_diagnostics(page, workspace, logger, label="invite_transient")
-            raise _TransientInviteError(f"{exc}. {diagnostics}") from exc
+            diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label="invite_transient")
+            raise _TransientInviteError(f"{exc}. {_diagnostics_summary(diagnostics)}") from exc
+        except _AntiBotBlockedError:
+            raise
         except Exception as exc:
-            diagnostics = await _capture_page_diagnostics(page, workspace, logger, label="invite_unexpected")
+            diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label="invite_unexpected")
             raise _InviteFailedError(
-                f"Failed to send invite in the ChatGPT Business workspace. {diagnostics}"
+                f"Failed to send invite in the ChatGPT Business workspace. {_diagnostics_summary(diagnostics)}"
             ) from exc
         finally:
             logger.info("Playwright run finished for workspace %s", workspace.id)
@@ -586,6 +688,15 @@ async def invite_to_workspace(
             return _result("no_workspace_available", workspace, member_count=exc.member_count, error_message=str(exc))
         except _AuthFailedError as exc:
             return _result("auth_failed", workspace, error_message=str(exc))
+        except _AntiBotBlockedError as exc:
+            return _result(
+                "anti_bot_blocked",
+                workspace,
+                error_message=f"anti_bot_blocked. {_diagnostics_summary(exc.diagnostics)}",
+                current_url=exc.diagnostics.current_url,
+                page_title=exc.diagnostics.title,
+                screenshot_path=exc.diagnostics.screenshot_path,
+            )
         except _InviteFailedError as exc:
             return _result("invite_failed", workspace, error_message=str(exc))
         except _TransientInviteError as exc:
@@ -620,10 +731,7 @@ async def validate_workspace_auth(
         return _validation_result(
             "invalid_auth",
             workspace,
-            error_message=(
-                f"Workspace auth artifact was not found. "
-                f"profile_dir={workspace.profile_dir} storage_state={workspace.storage_state_path}"
-            ),
+            error_message=f"Workspace profile dir was not found: profile_dir={workspace.profile_dir}",
         )
 
     logger = get_logger("automation.playwright")
@@ -641,12 +749,11 @@ async def validate_workspace_auth(
                 headless=chosen_headless,
             )
             page = await _workspace_page(context)
-            await page.goto(workspace.workspace_url, wait_until="domcontentloaded")
-            await _wait_for_network_idle(page)
+            await _ensure_workspace_page_ready(page, workspace, settings, logger, label="validation_open")
             if await _is_auth_required(page):
                 raise _AuthFailedError("Workspace requires a fresh login")
 
-            await _ensure_invite_flow_ready(page, settings)
+            await _ensure_invite_flow_ready(page, settings, workspace, logger, label="validation_invite")
             if await _is_auth_required(page):
                 raise _AuthFailedError("Invite area redirected to auth page")
 
@@ -654,7 +761,6 @@ async def validate_workspace_auth(
             members_url = page.url or workspace.members_url or workspace.workspace_url
             workspace_url = _derive_workspace_url(members_url, workspace.workspace_url)
             workspace_name = await _extract_workspace_name(page, workspace)
-            await _persist_workspace_auth_state(context, workspace)
             return _validation_result(
                 "active",
                 workspace,
@@ -665,14 +771,37 @@ async def validate_workspace_auth(
             )
         except _AuthFailedError as exc:
             if context is not None and page is not None:
-                diagnostics = await _capture_page_diagnostics(page, workspace, logger, label="validation_auth_failed")
-                return _validation_result("invalid_auth", workspace, error_message=f"{exc}. {diagnostics}")
+                diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label="validation_auth_failed")
+                return _validation_result(
+                    "invalid_auth",
+                    workspace,
+                    error_message=f"{exc}. {_diagnostics_summary(diagnostics)}",
+                    current_url=diagnostics.current_url,
+                    page_title=diagnostics.title,
+                    screenshot_path=diagnostics.screenshot_path,
+                )
             return _validation_result("invalid_auth", workspace, error_message=str(exc))
+        except _AntiBotBlockedError as exc:
+            return _validation_result(
+                "failed",
+                workspace,
+                error_message=f"anti_bot_blocked. {_diagnostics_summary(exc.diagnostics)}",
+                current_url=exc.diagnostics.current_url,
+                page_title=exc.diagnostics.title,
+                screenshot_path=exc.diagnostics.screenshot_path,
+            )
         except Exception as exc:  # pragma: no cover - defensive fallback
             if context is not None and page is not None:
-                diagnostics = await _capture_page_diagnostics(page, workspace, logger, label="validation_failed")
+                diagnostics = await _capture_page_diagnostics(page, workspace, settings, logger, label="validation_failed")
                 logger.exception("Workspace validation failed for %s", workspace.id)
-                return _validation_result("failed", workspace, error_message=f"{exc}. {diagnostics}")
+                return _validation_result(
+                    "failed",
+                    workspace,
+                    error_message=f"{exc}. {_diagnostics_summary(diagnostics)}",
+                    current_url=diagnostics.current_url,
+                    page_title=diagnostics.title,
+                    screenshot_path=diagnostics.screenshot_path,
+                )
             logger.exception("Workspace validation failed for %s", workspace.id)
             return _validation_result("failed", workspace, error_message=str(exc))
         finally:

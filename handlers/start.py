@@ -44,6 +44,7 @@ def build_start_router(app: AppContext, bot: Bot) -> Router:
                 session,
                 telegram_id=message.from_user.id,
                 username=message.from_user.username,
+                first_name=message.from_user.first_name or "",
                 full_name=message.from_user.full_name or "",
                 default_language=app.settings.default_language,
             )
@@ -92,6 +93,7 @@ def build_start_router(app: AppContext, bot: Bot) -> Router:
                 session,
                 telegram_id=callback.from_user.id,
                 username=callback.from_user.username,
+                first_name=callback.from_user.first_name or "",
                 full_name=callback.from_user.full_name or "",
                 default_language=language,
             )
@@ -130,6 +132,7 @@ def build_start_router(app: AppContext, bot: Bot) -> Router:
                     session,
                     telegram_id=message.from_user.id,
                     username=message.from_user.username,
+                    first_name=message.from_user.first_name or "",
                     full_name=message.from_user.full_name or "",
                     default_language=app.settings.default_language,
                 )

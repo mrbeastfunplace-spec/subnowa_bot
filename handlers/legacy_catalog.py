@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from html import escape
 from pathlib import Path
 import re
@@ -8,15 +9,16 @@ from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
-from db.base import OrderStatus
-from handlers.common import profile_markup
-from services.capcut import count_free_accounts
-from services.catalog import get_product, get_product_by_code
+from db.base import CheckoutSessionStatus, OrderStatus
+from handlers.common import insufficient_balance_markup, profile_markup, purchase_confirmation_markup
+from services.catalog import get_product, get_product_by_code, product_type_label, service_name
+from services.checkout import cancel_checkout_session, claim_checkout_processing, create_checkout_session, get_checkout_session
 from services.context import AppContext
+from services.inventory import count_available_inventory
 from services.legacy_ui import (
     build_capcut_details_markup,
     build_capcut_selector_markup,
-    build_details_markup,
+    build_chatgpt_menu_markup,
     build_gmail_choice_markup,
     build_invoice_markup,
     build_menu_only_markup,
@@ -26,30 +28,27 @@ from services.legacy_ui import (
     build_stock_empty_markup,
     build_subscription_check_markup,
     build_subscriptions_markup,
-    build_chatgpt_menu_markup,
     capcut_personal_text,
     capcut_ready_text,
-    capcut_card_text,
-    chatgpt_card_text,
     crypto_price_for_product,
     invoice_text,
     multi_service_name,
     other_request_name,
     payment_instruction_text,
-    product_title,
     text as ui_text,
 )
 from services.orders import attach_payment_method, change_status, create_custom_request, create_order, get_order_by_id, save_payment_proof
 from services.payments import get_payment_method, list_product_payment_methods
+from services.purchases import execute_checkout
 from services.settings import get_setting
 from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
 from states import UserFlowState
-from utils.formatting import user_display_name
+from utils.formatting import format_money, user_display_name
 from utils.messages import answer_or_edit
 
 
 GMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@gmail\.com$", re.IGNORECASE)
-EMAIL_PATTERN = re.compile(r"^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$", re.IGNORECASE)
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", re.IGNORECASE)
 CARD_NUMBER = "9860100126034816"
 USDT_TRC20_ADDRESS = "TUr3m7sAWpiysQs5S1jQkbxcvJARqAD8Rs"
 CLICK_QR_IMAGE_PATH = Path(__file__).resolve().parents[1] / "media" / "click.png.jpg"
@@ -86,6 +85,163 @@ async def _notify_admins(bot: Bot, app: AppContext, text: str, order_id: int | N
             continue
 
 
+def _sum_text(value: Decimal | int | float | str) -> str:
+    return format_money(value, "сум").replace(" сум", "") + " сум"
+
+
+def _chatgpt_variant_markup(language: str, personal_product, ready_product) -> InlineKeyboardMarkup:
+    ready_callback = f"buy_balance:{ready_product.id}" if ready_product is not None else "chatgpt_1m"
+    personal_price = _sum_text(personal_product.price if personal_product is not None else 79000)
+    ready_price = _sum_text(ready_product.price if ready_product is not None else 49000)
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="👤 Личный аккаунт — 79 000 сум", callback_data="buy_chatgpt_1m", style="success")],
+            [InlineKeyboardButton(text="📦 Готовый аккаунт — 49 000 сум", callback_data=ready_callback, style="success")],
+            [
+                InlineKeyboardButton(text=ui_text(language, "btn_back"), callback_data="open_chatgpt", style="danger"),
+                InlineKeyboardButton(text=ui_text(language, "btn_menu"), callback_data="menu:main"),
+            ],
+        ]
+    )
+
+
+def _insufficient_balance_text(product, balance_amount, language: str) -> str:
+    missing = max(Decimal(str(product.price)) - Decimal(str(balance_amount)), Decimal("0.00"))
+    return (
+        "❌ Недостаточно средств\n\n"
+        f"💎 Товар: {escape(service_name(product, language))}\n"
+        f"📦 Вариант: {escape(product_type_label(product, language))}\n"
+        f"💰 Цена: {_sum_text(product.price)}\n"
+        f"💳 Ваш баланс: {_sum_text(balance_amount)}\n"
+        f"➖ Не хватает: {_sum_text(missing)}\n\n"
+        "Пополните баланс, чтобы продолжить оформление заказа."
+    )
+
+
+def _checkout_confirmation_text(product, balance_amount, language: str) -> str:
+    balance_after = Decimal(str(balance_amount)) - Decimal(str(product.price))
+    return (
+        "✅ Подтверждение покупки\n\n"
+        f"💎 Товар: {escape(service_name(product, language))}\n"
+        f"📦 Вариант: {escape(product_type_label(product, language))}\n"
+        f"💰 Цена: {_sum_text(product.price)}\n"
+        f"💳 Ваш баланс: {_sum_text(balance_amount)}\n\n"
+        f"После подтверждения с вашего баланса будет списано:\n➖ {_sum_text(product.price)}\n\n"
+        "Остаток после оплаты:\n"
+        f"💰 {_sum_text(balance_after)}\n\n"
+        "Подтверждаете покупку?"
+    )
+
+
+def _processing_paid_text(order, balance_after) -> str:
+    return (
+        "✅ Оплата прошла успешно\n\n"
+        f"💎 Сервис: {escape(order.service_name_snapshot or order.product_name_snapshot)}\n"
+        f"📦 Вариант: {escape(order.product_type_snapshot or '-')}\n"
+        f"💰 Списано: {_sum_text(order.amount)}\n"
+        f"💳 Остаток: {_sum_text(balance_after)}\n\n"
+        "Ваш заказ принят в обработку.\nОжидайте подтверждения администратора."
+    )
+
+
+def _ready_paid_text(order, balance_after, delivery_content: str) -> str:
+    return (
+        "✅ Ваш заказ подтверждён\n\n"
+        f"💎 Сервис: {escape(order.service_name_snapshot or order.product_name_snapshot)}\n"
+        f"📦 Тип: {escape(order.product_type_snapshot or '-')}\n"
+        f"💰 Списано: {_sum_text(order.amount)}\n"
+        f"💳 Остаток: {_sum_text(balance_after)}\n\n"
+        "Данные по заказу:\n"
+        f"{escape(delivery_content)}\n\n"
+        "Спасибо за покупку!"
+    )
+
+
+async def _notify_admin_paid_balance_order(bot: Bot, app: AppContext, order, user) -> None:
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Выполнить заказ", callback_data=f"admin:order:deliver:{order.id}")],
+            [InlineKeyboardButton(text="❌ Отменить с возвратом", callback_data=f"admin:order:refund:{order.id}", style="danger")],
+            [InlineKeyboardButton(text="👤 Профиль клиента", callback_data=f"admin:user:view:{user.id}")],
+        ]
+    )
+    text_value = (
+        "🆕 Новый оплаченный заказ\n\n"
+        f"👤 Клиент: @{user.username or 'нет'}\n"
+        f"🆔 ID: <code>{user.telegram_id}</code>\n"
+        f"💎 Сервис: {escape(order.service_name_snapshot or order.product_name_snapshot)}\n"
+        f"📦 Вариант: {escape(order.product_type_snapshot or '-')}\n"
+        f"💰 Оплачено: {_sum_text(order.amount)}\n\n"
+        "Выполните заказ и отправьте данные клиенту."
+    )
+    for admin_id in app.settings.admin_ids:
+        try:
+            await bot.send_message(admin_id, text_value, reply_markup=markup)
+        except Exception:
+            continue
+
+
+async def _start_balance_checkout(
+    callback: CallbackQuery,
+    state: FSMContext,
+    app: AppContext,
+    *,
+    product,
+    language: str,
+    payload: dict | None = None,
+    back_callback: str,
+    alternate_callback: str | None = None,
+) -> None:
+    async with app.session_factory() as session:
+        user = await get_user_by_telegram_id(session, callback.from_user.id)
+        if user is None:
+            await callback.answer()
+            return
+        if (product.product_type or "") == "ready_access":
+            available = await count_available_inventory(session, product.id)
+            if available <= 0:
+                await callback.answer()
+                await answer_or_edit(
+                    callback,
+                    "❌ Сейчас нет доступных готовых вариантов\n\nВы можете выбрать другой вариант или обратиться в поддержку.",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="👤 Личный вариант", callback_data=alternate_callback or back_callback)],
+                            [InlineKeyboardButton(text="💬 Поддержка", url=app.settings.support_url)],
+                            [InlineKeyboardButton(text=ui_text(language, "btn_back"), callback_data=back_callback, style="danger")],
+                            [InlineKeyboardButton(text=ui_text(language, "btn_menu"), callback_data="menu:main")],
+                        ]
+                    ),
+                )
+                return
+        if Decimal(str(user.balance)) < Decimal(str(product.price)):
+            await callback.answer()
+            await answer_or_edit(
+                callback,
+                _insufficient_balance_text(product, user.balance, language),
+                reply_markup=insufficient_balance_markup(language, back_callback),
+            )
+            return
+        checkout = await create_checkout_session(
+            session,
+            user=user,
+            product=product,
+            payload={
+                **(payload or {}),
+                "back_callback": back_callback,
+                "alternate_callback": alternate_callback or "",
+            },
+        )
+        await session.commit()
+    await state.clear()
+    await callback.answer()
+    await answer_or_edit(
+        callback,
+        _checkout_confirmation_text(product, user.balance, language),
+        reply_markup=purchase_confirmation_markup(checkout.id, language),
+    )
+
+
 def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     router = Router(name="legacy_catalog")
 
@@ -112,10 +268,6 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await state.clear()
         await callback.answer()
         await _show_subscriptions(callback, language)
-
-    @router.callback_query(F.data.startswith("catalog:back:"))
-    async def catalog_back_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        await open_catalog_handler(callback, state)
 
     @router.callback_query(F.data == "open_grok")
     async def open_grok_handler(callback: CallbackQuery) -> None:
@@ -171,7 +323,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             ui_text(language, "chatgpt_menu_text"),
-            reply_markup=build_chatgpt_menu_markup(language, app.settings.support_url, product.price if product else 99000),
+            reply_markup=build_chatgpt_menu_markup(language, app.settings.support_url, product.price if product else 79000),
         )
 
     @router.callback_query(F.data == "open_capcut")
@@ -196,13 +348,13 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def chatgpt_1m_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
-            product = await get_product_by_code(session, "chatgpt_plus_month")
+            ready_product = await get_product_by_code(session, "chatgpt_ready_month")
         await state.clear()
         await callback.answer()
         await answer_or_edit(
             callback,
-            chatgpt_card_text(language, product.price if product else 99000),
-            reply_markup=build_details_markup(language, "chatgpt_1m"),
+            "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT Pro\n\nВыберите вариант подключения:",
+            reply_markup=_chatgpt_variant_markup(language, ready_product),
         )
 
     @router.callback_query(F.data == "capcut_1m")
@@ -235,22 +387,6 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             reply_markup=build_capcut_details_markup(language, "capcut_ready"),
         )
 
-    @router.callback_query(F.data == "back_to_chatgpt_1m")
-    async def back_to_chatgpt_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        await open_chatgpt_handler(callback, state)
-
-    @router.callback_query(F.data == "back_to_capcut_1m")
-    async def back_to_capcut_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        await open_capcut_handler(callback, state)
-
-    @router.callback_query(F.data == "back_to_capcut_personal")
-    async def back_to_capcut_personal_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        await open_capcut_handler(callback, state)
-
-    @router.callback_query(F.data == "back_to_capcut_ready")
-    async def back_to_capcut_ready_handler(callback: CallbackQuery, state: FSMContext) -> None:
-        await open_capcut_handler(callback, state)
-
     @router.callback_query(F.data.in_({"multi_chatgpt", "multi_capcut"}))
     async def multi_start_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
@@ -267,23 +403,20 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     @router.message(UserFlowState.waiting_multi_quantity)
     async def multi_quantity_handler(message: Message, state: FSMContext) -> None:
         quantity_value = (message.text or "").strip()
-        if not quantity_value.isdigit():
-            await message.answer("Введите число.")
+        if not quantity_value.isdigit() or int(quantity_value) <= 0:
+            await message.answer("Введите количество целым числом больше нуля.")
             return
         quantity = int(quantity_value)
-        if quantity <= 0:
-            await message.answer("Введите число больше нуля.")
-            return
         data = await state.get_data()
-        service_name = data.get("service_name") or "Unknown"
+        service_label = data.get("service_name") or "Unknown"
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
             user = await get_user_by_telegram_id(session, message.from_user.id)
             if user is None:
                 await message.answer("Пользователь не найден.")
                 return
-            order = await create_custom_request(session, user=user, language=language, note=f"{service_name} x {quantity}")
-            order.product_name_snapshot = f"{service_name} x {quantity}"
+            order = await create_custom_request(session, user=user, language=language, note=f"{service_label} x {quantity}")
+            order.product_name_snapshot = f"{service_label} x {quantity}"
             await session.commit()
         await state.clear()
         await message.answer(ui_text(language, "multi_done"))
@@ -294,7 +427,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             f"Пользователь: <b>{escape(user_display_name(message.from_user, message.from_user.id))}</b>\n"
             f"Username: @{message.from_user.username or 'нет'}\n"
             f"ID: <code>{message.from_user.id}</code>\n"
-            f"Сервис: {escape(service_name)}\n"
+            f"Сервис: {escape(service_label)}\n"
             f"Количество: {quantity}",
             order.id,
         )
@@ -345,7 +478,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             language = await get_user_language(session, message.from_user.id, app.settings.default_language)
             if not _is_valid_email(gmail):
-                await message.answer(ui_text(language, "invalid_email"))
+                await message.answer("Введите корректный email.")
                 return
             required_channel = await get_setting(session, "required_channel", app.settings.required_channel)
         await state.update_data(trial_gmail=gmail)
@@ -382,7 +515,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 },
                 status=OrderStatus.PROCESSING,
             )
-            order.product_name_snapshot = product_title(language, product.code)
+            order.product_name_snapshot = "ChatGPT Trial 3 дня"
             await session.commit()
         await state.clear()
         await callback.answer()
@@ -496,28 +629,18 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
                 await callback.answer()
                 await callback.message.answer(ui_text(language, "chatgpt_month_not_subscribed"))
                 return
-            user = await get_user_by_telegram_id(session, callback.from_user.id)
             product = await get_product_by_code(session, "chatgpt_plus_month")
-            if user is None or product is None or not gmail:
+            if product is None or not gmail:
                 await callback.answer()
                 return
-            order = await create_order(session, user=user, product=product, language=language, details={"gmail": gmail})
-            order.product_name_snapshot = product_title(language, product.code)
-            payment_methods = await list_product_payment_methods(session, product)
-            await session.commit()
-        await state.clear()
-        await callback.answer()
-        await _show_invoice(callback, order, language, payment_methods)
-        await _notify_admins(
-            bot,
+        await _start_balance_checkout(
+            callback,
+            state,
             app,
-            "Новая заявка ChatGPT Plus 1 месяц\n\n"
-            f"Пользователь: <b>{escape(user_display_name(callback.from_user, callback.from_user.id))}</b>\n"
-            f"Username: @{callback.from_user.username or 'нет'}\n"
-            f"ID: <code>{callback.from_user.id}</code>\n"
-            f"Заказ: {order.order_number}\n"
-            f"Gmail: {escape(gmail)}",
-            order.id,
+            product=product,
+            language=language,
+            payload={"gmail": gmail},
+            back_callback="chatgpt_1m",
         )
 
     @router.callback_query(F.data == "buy_capcut_1m")
@@ -528,44 +651,136 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def buy_capcut_ready_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
-            user = await get_user_by_telegram_id(session, callback.from_user.id)
             product = await get_product_by_code(session, "capcut_pro_month")
-            free_count = await count_free_accounts(session)
-            if user is None or product is None:
+            if product is None:
                 await callback.answer()
                 return
-            if free_count <= 0:
-                await callback.answer()
-                await answer_or_edit(
-                    callback,
-                    ui_text(language, "stock_empty"),
-                    reply_markup=build_stock_empty_markup(language, app.settings.support_url),
-                )
-                return
-            order = await create_order(session, user=user, product=product, language=language)
-            order.product_name_snapshot = product_title(language, product.code)
-            payment_methods = await list_product_payment_methods(session, product)
-            await session.commit()
-        await state.clear()
-        await callback.answer()
-        await _show_invoice(callback, order, language, payment_methods)
+        await _start_balance_checkout(
+            callback,
+            state,
+            app,
+            product=product,
+            language=language,
+            back_callback="capcut_ready",
+            alternate_callback="capcut_personal",
+        )
 
     @router.callback_query(F.data == "buy_capcut_personal")
     async def buy_capcut_personal_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
-            user = await get_user_by_telegram_id(session, callback.from_user.id)
             product = await get_product_by_code(session, "capcut_personal_month")
-            if user is None or product is None:
+            if product is None:
                 await callback.answer()
                 return
-            order = await create_order(session, user=user, product=product, language=language)
-            order.product_name_snapshot = product_title(language, product.code)
-            payment_methods = await list_product_payment_methods(session, product)
+        await _start_balance_checkout(
+            callback,
+            state,
+            app,
+            product=product,
+            language=language,
+            back_callback="capcut_personal",
+            alternate_callback="capcut_ready",
+        )
+
+    @router.callback_query(F.data.startswith("buy_balance:"))
+    async def buy_balance_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        product_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            product = await get_product(session, product_id)
+            if product is None:
+                await callback.answer()
+                return
+            back_callback = "chatgpt_1m" if (product.service_name or "").startswith("ChatGPT") else "open_subscriptions"
+            alternate_callback = "buy_chatgpt_1m" if (product.service_name or "").startswith("ChatGPT") else None
+        await _start_balance_checkout(
+            callback,
+            state,
+            app,
+            product=product,
+            language=language,
+            back_callback=back_callback,
+            alternate_callback=alternate_callback,
+        )
+
+    @router.callback_query(F.data.startswith("checkout:pay:"))
+    async def checkout_pay_handler(callback: CallbackQuery) -> None:
+        checkout_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            checkout = await get_checkout_session(session, checkout_id)
+            if checkout is None:
+                await callback.answer()
+                await answer_or_edit(callback, "⚠️ Этот заказ уже обработан\n\nПроверьте раздел “Мои заказы”.")
+                return
+            if checkout.status == CheckoutSessionStatus.COMPLETED:
+                await callback.answer()
+                await answer_or_edit(callback, "⚠️ Этот заказ уже обработан\n\nПроверьте раздел “Мои заказы”.")
+                return
+            if not await claim_checkout_processing(session, checkout_id):
+                await session.commit()
+                await callback.answer()
+                await answer_or_edit(callback, "⚠️ Этот заказ уже обработан\n\nПроверьте раздел “Мои заказы”.")
+                return
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            result = await execute_checkout(session, checkout_id=checkout_id, language=language)
             await session.commit()
-        await state.clear()
+
+        if not result.ok:
+            await callback.answer()
+            if result.reason == "stock_empty":
+                await answer_or_edit(
+                    callback,
+                    "❌ Сейчас нет доступных готовых вариантов\n\nВы можете выбрать другой вариант или обратиться в поддержку.",
+                    reply_markup=InlineKeyboardMarkup(
+                        inline_keyboard=[
+                            [InlineKeyboardButton(text="💳 Пополнить баланс", callback_data="profile:topup")],
+                            [InlineKeyboardButton(text=ui_text(language, "btn_menu"), callback_data="menu:main")],
+                        ]
+                    ),
+                )
+                return
+            if result.reason == "insufficient_balance" and result.product is not None and result.user is not None:
+                back_callback = (result.checkout.payload or {}).get("back_callback") or "open_subscriptions"
+                await answer_or_edit(
+                    callback,
+                    _insufficient_balance_text(result.product, result.user.balance, language),
+                    reply_markup=insufficient_balance_markup(language, back_callback),
+                )
+                return
+            await answer_or_edit(callback, "⚠️ Этот заказ уже обработан\n\nПроверьте раздел “Мои заказы”.")
+            return
+
         await callback.answer()
-        await _show_invoice(callback, order, language, payment_methods)
+        if result.reason == "completed":
+            await answer_or_edit(
+                callback,
+                _ready_paid_text(result.order, result.user.balance, result.delivery_content or ""),
+                reply_markup=build_menu_only_markup(language),
+            )
+            return
+
+        await answer_or_edit(
+            callback,
+            _processing_paid_text(result.order, result.user.balance),
+            reply_markup=build_menu_only_markup(language),
+        )
+        await _notify_admin_paid_balance_order(bot, app, result.order, result.user)
+
+    @router.callback_query(F.data.startswith("checkout:cancel:"))
+    async def checkout_cancel_handler(callback: CallbackQuery) -> None:
+        checkout_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            checkout = await get_checkout_session(session, checkout_id)
+            if checkout is not None and checkout.status == CheckoutSessionStatus.PENDING:
+                await cancel_checkout_session(session, checkout)
+                await session.commit()
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            "❌ Покупка отменена\n\nДеньги с баланса не списаны.",
+            reply_markup=build_menu_only_markup("ru"),
+        )
 
     @router.callback_query(F.data.startswith("product:view:"))
     async def legacy_product_view_handler(callback: CallbackQuery, state: FSMContext) -> None:
@@ -575,11 +790,14 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         if product is None:
             await callback.answer()
             return
-        if product.code == "chatgpt_plus_month":
+        if product.code in {"chatgpt_plus_month", "chatgpt_ready_month"}:
             await chatgpt_1m_handler(callback, state)
             return
         if product.code == "capcut_pro_month":
             await open_capcut_handler(callback, state)
+            return
+        if product.code == "capcut_personal_month":
+            await capcut_personal_handler(callback, state)
             return
         await open_catalog_handler(callback, state)
 
@@ -591,20 +809,41 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def legacy_product_buy_handler(callback: CallbackQuery, state: FSMContext) -> None:
         product_id = int(callback.data.split(":")[-1])
         async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             product = await get_product(session, product_id)
-        if product is None:
-            await callback.answer()
-            return
-        if product.code == "chatgpt_plus_month":
-            await buy_chatgpt_handler(callback, state)
-            return
-        if product.code == "capcut_pro_month":
-            await open_capcut_handler(callback, state)
-            return
-        if product.code == "capcut_personal_month":
-            await buy_capcut_personal_handler(callback, state)
-            return
+            user = await get_user_by_telegram_id(session, callback.from_user.id)
+            if product is None:
+                await callback.answer()
+                return
+            if product.code == "chatgpt_plus_month":
+                await buy_chatgpt_handler(callback, state)
+                return
+            if product.code == "chatgpt_ready_month":
+                await _start_balance_checkout(
+                    callback,
+                    state,
+                    app,
+                    product=product,
+                    language=language,
+                    back_callback="chatgpt_1m",
+                    alternate_callback="buy_chatgpt_1m",
+                )
+                return
+            if product.code == "capcut_pro_month":
+                await buy_capcut_ready_handler(callback, state)
+                return
+            if product.code == "capcut_personal_month":
+                await buy_capcut_personal_handler(callback, state)
+                return
+            if user is None:
+                await callback.answer()
+                return
+            order = await create_order(session, user=user, product=product, language=language)
+            payment_methods = await list_product_payment_methods(session, product)
+            await session.commit()
+        await state.clear()
         await callback.answer()
+        await _show_invoice(callback, order, language, payment_methods)
 
     @router.callback_query(F.data.startswith("order:payment_methods:"))
     async def order_payment_methods_handler(callback: CallbackQuery) -> None:
@@ -644,7 +883,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             if return_to == "profile":
                 display_name = escape(user_display_name(message.from_user, message.from_user.id))
                 await message.answer(
-                    "<b>Ваш профиль\n\nВыберите раздел 👇</b>\n\n"
+                    "<b>👤 Ваш профиль</b>\n\n"
                     f"Пользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
                     reply_markup=profile_markup(language, app.settings.support_url),
                 )

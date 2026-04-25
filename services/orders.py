@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.base import OrderStatus, utcnow
 from db.models import Order, OrderStatusHistory, PaymentMethod, Product, User
-from services.catalog import product_name
+from services.catalog import product_name, product_type_label, service_name
 from utils.formatting import order_duration_days
 from utils.order_numbers import generate_order_number
 
@@ -28,12 +28,17 @@ async def create_order(
     details: dict | None = None,
     customer_note: str | None = None,
     status: OrderStatus = OrderStatus.PENDING_PAYMENT,
+    paid_at=None,
+    admin_id: int | None = None,
+    delivery_content: str | None = None,
 ) -> Order:
     order = Order(
         order_number=await _build_unique_order_number(session),
         user_id=user.id,
         product_id=product.id,
         product_code_snapshot=product.code,
+        service_name_snapshot=service_name(product, language),
+        product_type_snapshot=product_type_label(product, language),
         product_name_snapshot=product_name(product, language),
         amount=product.price,
         currency=product.currency,
@@ -43,6 +48,9 @@ async def create_order(
         language=language,
         customer_note=customer_note,
         details=details or {},
+        paid_at=paid_at,
+        admin_id=admin_id,
+        delivery_content=delivery_content,
     )
     session.add(order)
     await session.flush()
@@ -61,6 +69,8 @@ async def create_custom_request(
         user_id=user.id,
         product_id=None,
         product_code_snapshot="custom_request",
+        service_name_snapshot="Custom request",
+        product_type_snapshot="-",
         product_name_snapshot="Custom request",
         amount=0,
         currency="UZS",
@@ -70,6 +80,7 @@ async def create_custom_request(
         language=language,
         customer_note=note,
         details={"note": note},
+        paid_at=utcnow(),
     )
     session.add(order)
     await session.flush()
@@ -101,14 +112,21 @@ async def change_status(
     new_status: OrderStatus,
     changed_by_telegram_id: int | None = None,
     note: str | None = None,
+    admin_id: int | None = None,
 ) -> Order:
     old_status = order.status
     order.status = new_status
+    if new_status in {OrderStatus.PAID, OrderStatus.PROCESSING, OrderStatus.COMPLETED} and order.paid_at is None:
+        order.paid_at = utcnow()
     if new_status == OrderStatus.COMPLETED:
         completed_at = utcnow()
         order.completed_at = completed_at
         duration_days = order_duration_days(order.product_code_snapshot)
         order.expires_at = completed_at + timedelta(days=duration_days) if duration_days is not None else None
+    if new_status == OrderStatus.REFUNDED:
+        order.refunded_at = utcnow()
+    if admin_id is not None:
+        order.admin_id = admin_id
     order.updated_at = utcnow()
     await add_history(session, order, old_status, new_status, changed_by_telegram_id, note)
     await session.flush()
@@ -135,6 +153,27 @@ async def save_payment_proof(
         order,
         OrderStatus.WAITING_CHECK,
         changed_by_telegram_id=changed_by_telegram_id,
+    )
+
+
+async def complete_order_delivery(
+    session: AsyncSession,
+    order: Order,
+    *,
+    delivery_content: str,
+    admin_id: int,
+) -> Order:
+    order.delivery_content = delivery_content
+    details = dict(order.details or {})
+    details["delivery_content"] = delivery_content
+    order.details = details
+    return await change_status(
+        session,
+        order,
+        OrderStatus.COMPLETED,
+        changed_by_telegram_id=admin_id,
+        note="delivery sent",
+        admin_id=admin_id,
     )
 
 
@@ -168,4 +207,14 @@ async def list_orders(
         stmt = stmt.where(Order.status.in_([OrderStatus(status) for status in statuses]))
     stmt = stmt.limit(limit)
     result = await session.scalars(stmt)
+    return list(result.all())
+
+
+async def list_orders_for_user(session: AsyncSession, user_id: int, limit: int = 20) -> list[Order]:
+    result = await session.scalars(
+        select(Order)
+        .where(Order.user_id == user_id)
+        .order_by(desc(Order.created_at), desc(Order.id))
+        .limit(limit)
+    )
     return list(result.all())

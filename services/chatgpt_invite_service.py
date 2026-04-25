@@ -89,20 +89,32 @@ def _is_run_in_progress(order) -> bool:
 def _build_admin_message(order, result: PlaywrightInviteResult, final_status: OrderStatus) -> str:
     workspace_line = f"Workspace: {result.workspace_name or result.workspace_id or '-'}"
     error_line = f"\nОшибка: {escape(result.error_message)}" if result.error_message else ""
+    debug_line = ""
+    if result.current_url:
+        debug_line += f"\nURL: <code>{escape(result.current_url)}</code>"
+    if result.page_title:
+        debug_line += f"\nTitle: <code>{escape(result.page_title)}</code>"
+    if result.screenshot_path:
+        debug_line += f"\nScreenshot: <code>{escape(result.screenshot_path)}</code>"
+
     if result.status == "invited":
         headline = "Заказ выполнен: invite отправлен"
     elif result.status == "already_invited":
         headline = "Заказ завершён: email уже был приглашён"
+    elif result.status == "anti_bot_blocked":
+        headline = "Заказ остановлен: anti-bot block"
     elif final_status == OrderStatus.WAITING:
         headline = "Заказ переведён в ожидание: свободных мест нет"
     else:
         headline = "Заказ завершился ошибкой: нужен ручной просмотр"
+
     return (
         f"{headline}\n\n"
         f"Заказ: <code>{order_display_number(order)}</code>\n"
         f"Email: <code>{escape(str((order.details or {}).get('gmail', '-')))}</code>\n"
         f"{workspace_line}"
         f"{error_line}"
+        f"{debug_line}"
     )
 
 
@@ -254,6 +266,9 @@ async def _run_chatgpt_business_order(
             "workspace_name": result.workspace_name,
             "member_count": result.member_count,
             "error_message": result.error_message,
+            "current_url": result.current_url,
+            "page_title": result.page_title,
+            "screenshot_path": result.screenshot_path,
             "started_at": _isoformat(started_at),
             "finished_at": _isoformat(finished_at),
         }

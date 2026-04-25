@@ -4,3 +4,5 @@ __pycache__/
 .codex_compile/
 automation/auth_state/storage_states/
 automation/auth_state/profiles/
+automation/auth_state/chrome_profiles/
+automation/debug/

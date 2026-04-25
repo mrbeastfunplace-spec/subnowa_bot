@@ -35,6 +35,10 @@ async def get_payment_method(session: AsyncSession, payment_method_id: int) -> P
     return await session.scalar(select(PaymentMethod).where(PaymentMethod.id == payment_method_id))
 
 
+async def get_payment_method_by_code(session: AsyncSession, code: str) -> PaymentMethod | None:
+    return await session.scalar(select(PaymentMethod).where(PaymentMethod.code == code))
+
+
 async def toggle_product_payment_method(
     session: AsyncSession,
     product_id: int,

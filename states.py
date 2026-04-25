@@ -11,6 +11,8 @@ class UserFlowState(StatesGroup):
     waiting_promo_code = State()
     waiting_custom_request = State()
     waiting_payment_proof = State()
+    waiting_topup_custom_amount = State()
+    waiting_topup_receipt = State()
 
 
 class AdminState(StatesGroup):
@@ -33,6 +35,11 @@ class AdminState(StatesGroup):
     waiting_payment_photo = State()
     waiting_stock_single = State()
     waiting_stock_bulk = State()
+    waiting_inventory_item = State()
+    waiting_order_delivery = State()
+    waiting_user_lookup = State()
+    waiting_balance_adjustment = State()
+    waiting_user_message = State()
 
 
 class AdminBroadcastState(StatesGroup):

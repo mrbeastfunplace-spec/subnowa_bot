@@ -17,7 +17,6 @@ from services.workspace_registry_service import (
     get_workspace,
     list_registry_workspaces,
     set_workspace_enabled,
-    short_storage_reference,
     workspace_status_label,
 )
 from utils.messages import answer_or_edit
@@ -42,7 +41,14 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
         return InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Я завершил вход", callback_data=f"admin:chatgpt_accounts:confirm:{workspace_db_id}")],
-                [InlineKeyboardButton(text="Отменить", callback_data=f"admin:chatgpt_accounts:cancel:{workspace_db_id}")],
+                [InlineKeyboardButton(text="Список аккаунтов", callback_data="admin:chatgpt_accounts:list")],
+            ]
+        )
+
+    def _confirm_success_markup(workspace_db_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Проверить", callback_data=f"admin:chatgpt_accounts:check:{workspace_db_id}")],
                 [InlineKeyboardButton(text="Список аккаунтов", callback_data="admin:chatgpt_accounts:list")],
             ]
         )
@@ -77,6 +83,9 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
         status = workspace_status_label(workspace.status)
         current_users = workspace.current_users_count if workspace.current_users_count is not None else "-"
         last_checked = workspace.last_checked_at.strftime("%Y-%m-%d %H:%M") if workspace.last_checked_at else "-"
+        profile_dir = workspace.profile_dir or "-"
+        workspace_url = workspace.workspace_url or "-"
+        members_url = workspace.members_url or "-"
         notes = workspace.notes or "-"
         error_line = f"\nОшибка: {workspace.last_error}" if workspace.last_error else ""
         return (
@@ -84,7 +93,9 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
             f"ID: <code>{workspace.workspace_id}</code>\n"
             f"Статус: <b>{status}</b>\n"
             f"Участников: <b>{current_users}</b>\n"
-            f"StorageState: <code>{short_storage_reference(workspace.storage_state_path)}</code>\n"
+            f"ProfileDir: <code>{profile_dir}</code>\n"
+            f"Workspace URL: <code>{workspace_url}</code>\n"
+            f"Members URL: <code>{members_url}</code>\n"
             f"Последняя проверка: <b>{last_checked}</b>\n"
             f"Заметки: {notes}"
             f"{error_line}"
@@ -100,8 +111,9 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
             callback,
             (
                 "<b>ChatGPT аккаунты</b>\n\n"
-                "Здесь можно запустить полуавтоматическое подключение нового ChatGPT Business аккаунта, "
-                "проверить текущие сессии и обновить авторизацию."
+                "Railway хранит профили и выполняет invite flow, но окно браузера на Railway не открывается. "
+                "Авторизация нового аккаунта выполняется локально на вашем компьютере, после чего готовый persistent profile "
+                "должен оказаться в Railway volume."
             ),
             reply_markup=_menu_markup(),
         )
@@ -115,12 +127,12 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             (
-                "Подготовьте новый ChatGPT Business аккаунт для входа.\n"
-                "Когда будете готовы пройти авторизацию и 2FA, нажмите 'Начать подключение'."
+                "Создам запись для нового ChatGPT Business workspace и подготовлю путь профиля в Railway volume.\n\n"
+                "Важно: авторизация выполняется локально на вашем компьютере. Бот не будет пытаться открыть браузер на Railway."
             ),
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
-                    [InlineKeyboardButton(text="Начать подключение", callback_data="admin:chatgpt_accounts:start")],
+                    [InlineKeyboardButton(text="Создать workspace", callback_data="admin:chatgpt_accounts:start")],
                     [InlineKeyboardButton(text="Отмена", callback_data="admin:chatgpt_accounts")],
                     [InlineKeyboardButton(text="Меню", callback_data="admin:main")],
                 ]
@@ -137,12 +149,23 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
             bot,
             admin_id=callback.from_user.id,
         )
+        async with app.session_factory() as session:
+            workspace = await get_workspace(session, workspace_db_id)
         await callback.answer()
+        profile_dir = workspace.profile_dir if workspace is not None else "-"
+        workspace_code = workspace.workspace_id if workspace is not None else "-"
         await answer_or_edit(
             callback,
             (
-                "⚙️ Запущено подключение нового аккаунта.\n"
-                "Пожалуйста, выполните вход в открывшемся окне браузера и завершите авторизацию."
+                "Создан новый ChatGPT workspace record.\n\n"
+                f"ID: <code>{workspace_code}</code>\n"
+                f"ProfileDir: <code>{profile_dir}</code>\n"
+                "Статус: <b>pending_setup</b>\n\n"
+                "Авторизация выполняется локально на вашем компьютере.\n"
+                "1. Войдите в нужный ChatGPT Business workspace локально.\n"
+                "2. Сохраните persistent Chromium profile именно в этот каталог Railway volume.\n"
+                "3. После загрузки профиля нажмите «Я завершил вход».\n"
+                "4. Затем нажмите «Проверить», чтобы зафиксировать рабочий URL и проверить invite flow."
             ),
             reply_markup=_launch_markup(workspace_db_id),
         )
@@ -199,16 +222,31 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
             await callback.answer()
             return
         workspace_id = int(callback.data.split(":")[-1])
-        confirmed = confirm_workspace_onboarding(workspace_id)
-        await callback.answer("Проверяю сессию..." if confirmed else "Onboarding уже завершён или не запущен.")
-        if confirmed:
+        result = await confirm_workspace_onboarding(app, workspace_db_id=workspace_id)
+        await callback.answer("Проверяю загруженный профиль...")
+        if not result.ok:
             await answer_or_edit(
                 callback,
-                "Проверяю сохранённую сессию. Как только валидация закончится, пришлю отдельное сообщение.",
-                reply_markup=InlineKeyboardMarkup(
-                    inline_keyboard=[[InlineKeyboardButton(text="Список аккаунтов", callback_data="admin:chatgpt_accounts:list")]]
+                (
+                    f"{result.error_message or 'Профиль не найден.'}\n\n"
+                    f"ProfileDir: <code>{result.profile_dir or '-'}</code>\n"
+                    "Кнопка подтверждает только уже загруженный профиль. "
+                    "Сначала выполните локальную авторизацию и перенесите persistent profile в Railway volume."
                 ),
+                reply_markup=_launch_markup(workspace_id),
             )
+            return
+        await answer_or_edit(
+            callback,
+            (
+                "Профиль найден, workspace активирован.\n\n"
+                f"ID: <code>{result.workspace_id or '-'}</code>\n"
+                f"ProfileDir: <code>{result.profile_dir or '-'}</code>\n\n"
+                "Следующий шаг: нажмите «Проверить», чтобы headless-проверка на Railway подтвердила авторизацию и "
+                "зафиксировала рабочий URL для invite flow."
+            ),
+            reply_markup=_confirm_success_markup(workspace_id),
+        )
 
     @router.callback_query(F.data.startswith("admin:chatgpt_accounts:cancel:"))
     async def workspace_cancel_handler(callback: CallbackQuery) -> None:
@@ -220,7 +258,7 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
             app,
             workspace_db_id=workspace_id,
         )
-        await callback.answer("Подключение отменено." if cancelled else "Onboarding не найден.")
+        await callback.answer("Подключение отменено." if cancelled else "Активного onboarding-процесса нет.")
         await workspace_list_handler(callback)
 
     @router.callback_query(F.data.startswith("admin:chatgpt_accounts:refresh:"))
@@ -240,12 +278,17 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
             admin_id=callback.from_user.id,
             workspace_db_id=workspace.id,
         )
+        async with app.session_factory() as session:
+            refreshed_workspace = await get_workspace(session, launched_id)
         await callback.answer()
+        profile_dir = refreshed_workspace.profile_dir if refreshed_workspace is not None else "-"
         await answer_or_edit(
             callback,
             (
-                "⚙️ Запущено обновление сессии аккаунта.\n"
-                "Войдите в браузере, завершите авторизацию и затем нажмите 'Я завершил вход'."
+                "Workspace переведён в pending_setup для обновления сессии.\n\n"
+                f"ProfileDir: <code>{profile_dir}</code>\n"
+                "Railway не откроет браузер. Обновите авторизацию локально на вашем компьютере, "
+                "перезапишите persistent profile в этот каталог и после этого нажмите «Я завершил вход»."
             ),
             reply_markup=_launch_markup(launched_id),
         )
@@ -266,7 +309,7 @@ def build_admin_workspace_router(app: AppContext, bot: Bot) -> Router:
         if started:
             await answer_or_edit(
                 callback,
-                "Проверяю аккаунт. Результат пришлю отдельным сообщением.",
+                "Проверяю профиль на Railway. Результат пришлю отдельным сообщением.",
                 reply_markup=InlineKeyboardMarkup(
                     inline_keyboard=[[InlineKeyboardButton(text="Список аккаунтов", callback_data="admin:chatgpt_accounts:list")]]
                 ),
