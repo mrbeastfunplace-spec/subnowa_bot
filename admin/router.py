@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -8,20 +9,48 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy import func, select
 
-from db.base import ButtonActionType, Language, OrderStatus, PaymentProviderType, ProductStatus
-from db.models import CapCutAccount, Category, Layout, LayoutButton, LayoutButtonTranslation, Order, PaymentMethod, PaymentMethodTranslation, Product, ProductPaymentMethod, ProductTranslation, TextEntry, TextTranslation
+from db.base import BalanceTransactionType, ButtonActionType, Language, OrderStatus, PaymentProviderType, ProductStatus, TopupStatus
+from db.models import (
+    CapCutAccount,
+    Category,
+    InventoryItem,
+    Layout,
+    LayoutButton,
+    LayoutButtonTranslation,
+    Order,
+    PaymentMethod,
+    PaymentMethodTranslation,
+    Product,
+    ProductPaymentMethod,
+    ProductTranslation,
+    TextEntry,
+    TextTranslation,
+    Topup,
+    User,
+)
 from services.admin import build_stats_text
+from services.balance import apply_admin_adjustment, credit_balance
 from services.buttons import build_layout_markup, get_button, get_layout, list_layouts
 from services.capcut import add_bulk_accounts, add_capcut_account, claim_free_account, count_free_accounts, list_accounts, purge_expired_accounts
-from services.catalog import category_name, get_category, get_product, product_name
+from services.catalog import category_name, get_category, get_product, product_name, product_type_label, service_name
 from services.chatgpt_invite_service import start_chatgpt_business_order
 from services.context import AppContext
-from services.orders import change_status, get_order_by_id, get_order_by_reference, list_orders
+from services.inventory import (
+    add_inventory_item,
+    get_inventory_item,
+    get_inventory_summary,
+    list_inventory_items,
+    list_inventory_products,
+    soft_delete_inventory_item,
+)
+from services.orders import change_status, complete_order_delivery, get_order_by_id, get_order_by_reference, list_orders
 from services.payments import get_payment_method, payment_title, toggle_product_payment_method
+from services.purchases import refund_order
 from services.texts import format_text
-from services.users import get_user_language
+from services.topups import approve_topup, get_topup_by_id, list_pending_topups, reject_topup
+from services.users import count_orders_for_user, find_users, get_user_by_id, get_user_language
 from states import AdminState
-from utils.formatting import format_money, order_display_number, order_status_label, user_display_name
+from utils.formatting import format_datetime_local, format_money, order_display_number, order_status_label, user_display_name
 from utils.messages import answer_or_edit
 from utils.translations import pick_translation
 
@@ -38,16 +67,114 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             inline_keyboard=[[InlineKeyboardButton(text="Назад в админку", callback_data="admin:main")]]
         )
 
+    def _parse_amount(value: str | None) -> Decimal | None:
+        raw = (value or "").replace(" ", "").replace(",", ".").strip()
+        if not raw:
+            return None
+        try:
+            amount = Decimal(raw).quantize(Decimal("0.01"))
+        except (InvalidOperation, ValueError):
+            return None
+        if amount <= 0:
+            return None
+        return amount
+
     async def _render_admin_main(target: Message | CallbackQuery) -> None:
         async with app.session_factory() as session:
             markup = await build_layout_markup(session, "admin_main", "ru")
             title = await format_text(session, "admin.panel_title", "ru", fallback="Админ-панель")
         await answer_or_edit(target, f"<b>{title}</b>", reply_markup=markup)
 
+    def _admin_user_text(user: User, orders_count: int) -> str:
+        username = f"@{user.username.lstrip('@')}" if (user.username or "").strip() else "—"
+        return (
+            "<b>👤 Профиль клиента</b>\n\n"
+            f"🆔 ID: <code>{user.telegram_id}</code>\n"
+            f"👤 Username: {escape(username)}\n"
+            f"💰 Баланс: {format_money(user.balance, 'сум')}\n"
+            f"🛒 Покупок: {orders_count}\n"
+            f"📅 Регистрация: {format_datetime_local(user.created_at)}"
+        )
+
+    def _admin_user_markup(user_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить баланс", callback_data=f"admin:user:adjust:{user_id}:add")],
+                [InlineKeyboardButton(text="➖ Списать баланс", callback_data=f"admin:user:adjust:{user_id}:subtract")],
+                [InlineKeyboardButton(text="💬 Написать клиенту", callback_data=f"admin:user:message:{user_id}")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:users")],
+            ]
+        )
+
+    def _topup_view_markup(topup: Topup, pending_ids: list[int], index: int) -> InlineKeyboardMarkup:
+        rows = [
+            [InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"admin:topup:approve:{topup.id}")],
+            [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin:topup:reject:{topup.id}", style="danger")],
+        ]
+        if topup.user_id:
+            rows.append([InlineKeyboardButton(text="👤 Профиль клиента", callback_data=f"admin:user:view:{topup.user_id}")])
+        if index + 1 < len(pending_ids):
+            rows.append([InlineKeyboardButton(text="➡️ Следующая", callback_data=f"admin:topups:show:{index + 1}")])
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def _render_topup_text(topup: Topup, index: int, total: int) -> str:
+        username = f"@{topup.user.username}" if topup.user and (topup.user.username or "").strip() else "—"
+        telegram_id = topup.user.telegram_id if topup.user else "-"
+        return (
+            f"<b>📥 Заявка #{topup.id}</b>\n\n"
+            f"👤 Пользователь: {escape(username)}\n"
+            f"🆔 ID: <code>{telegram_id}</code>\n"
+            f"💰 Сумма: {format_money(topup.amount, 'сум')}\n"
+            f"💳 Способ: {escape(topup.payment_method or '-')}\n"
+            "⏳ Статус: Ожидает проверки\n"
+            f"🕒 Дата: {format_datetime_local(topup.created_at)}\n\n"
+            f"{index + 1} из {total}"
+        )
+
+    def _inventory_products_markup(products: list[Product]) -> InlineKeyboardMarkup:
+        rows = [
+            [InlineKeyboardButton(text=service_name(product, "ru"), callback_data=f"admin:inventory:product:{product.id}")]
+            for product in products
+        ]
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    def _inventory_product_markup(product_id: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➕ Добавить доступ", callback_data=f"admin:inventory:add:{product_id}")],
+                [InlineKeyboardButton(text="📋 Список доступов", callback_data=f"admin:inventory:list:{product_id}")],
+                [InlineKeyboardButton(text="🗑 Удалить доступ", callback_data=f"admin:inventory:delete_list:{product_id}")],
+                [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:inventory")],
+            ]
+        )
+
+    def _inventory_delete_markup(product_id: int, items: list[InventoryItem]) -> InlineKeyboardMarkup:
+        rows = [
+            [InlineKeyboardButton(text=f"#{item.id} • {(item.title or 'Доступ')[:32]}", callback_data=f"admin:inventory:delete:{item.id}")]
+            for item in items
+        ]
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:inventory:product:{product_id}")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
     def _render_order_text(order: Order) -> str:
         details = order.details or {}
         display_name = escape(user_display_name(order.user))
         telegram_id = order.user.telegram_id if order.user else "-"
+        return (
+            f"<b>🛒 Заказ {order_display_number(order)}</b>\n\n"
+            f"👤 Клиент: <b>{display_name}</b>\n"
+            f"🆔 ID: <code>{telegram_id}</code>\n"
+            f"💎 Сервис: {escape(order.service_name_snapshot or order.product_name_snapshot or 'Заказ')}\n"
+            f"📦 Тип: {escape(order.product_type_snapshot or order.delivery_type or '-')}\n"
+            f"💰 Оплачено: <b>{format_money(order.amount, order.currency)}</b>\n"
+            f"⏳ Статус: <b>{order_status_label(order.status.value, 'ru')}</b>\n"
+            f"🕒 Дата: {format_datetime_local(order.created_at)}\n"
+            f"💳 Метод оплаты: {escape(order.payment_method.admin_title) if order.payment_method else '-'}\n"
+            f"Gmail: {escape(str(details.get('gmail', '-')))}\n"
+            f"Комментарий: {escape(order.customer_note or '-')}"
+        )
         return (
             f"<b>{escape(order.product_name_snapshot or 'Заказ')}</b>\n\n"
             f"Номер: <code>{order_display_number(order)}</code>\n"
@@ -64,6 +191,17 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
 
     def _order_actions_markup(order: Order) -> InlineKeyboardMarkup:
         rows: list[list[InlineKeyboardButton]] = []
+        if order.status in {OrderStatus.WAITING_CHECK, OrderStatus.PENDING_PAYMENT, OrderStatus.FAILED}:
+            rows.append([InlineKeyboardButton(text="Подтвердить", callback_data=f"admin:approve:{order.id}")])
+            rows.append([InlineKeyboardButton(text="Отклонить", callback_data=f"admin:reject:{order.id}")])
+        if order.status in {OrderStatus.PAID, OrderStatus.PROCESSING, OrderStatus.WAITING}:
+            rows.append([InlineKeyboardButton(text="✅ Выполнить", callback_data=f"admin:order:deliver:{order.id}")])
+            rows.append([InlineKeyboardButton(text="❌ Отменить с возвратом", callback_data=f"admin:order:refund:{order.id}", style="danger")])
+            rows.append([InlineKeyboardButton(text="💬 Написать клиенту", callback_data=f"admin:order:message:{order.id}")])
+            if order.user_id:
+                rows.append([InlineKeyboardButton(text="👤 Профиль клиента", callback_data=f"admin:user:view:{order.user_id}")])
+        rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:orders")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
         if order.status in {
             OrderStatus.WAITING_CHECK,
             OrderStatus.PAID,
@@ -252,6 +390,18 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         )
 
     def _product_list_markup(products: list[Product]) -> InlineKeyboardMarkup:
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text=f"{service_name(product, 'ru')} • {product_type_label(product, 'ru')} • {format_money(product.price, product.currency)}",
+                    callback_data=f"admin:product:{product.id}",
+                )
+            ]
+            for product in products
+        ]
+        rows.append([InlineKeyboardButton(text="Добавить товар", callback_data="admin:products:add")])
+        rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:main")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
         rows = [[InlineKeyboardButton(text=f"{product.code} ({product.status.value})", callback_data=f"admin:product:{product.id}")] for product in products]
         rows.append([InlineKeyboardButton(text="Добавить товар", callback_data="admin:products:add")])
         rows.append([InlineKeyboardButton(text="Назад", callback_data="admin:main")])
@@ -332,6 +482,106 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         await callback.answer()
         await answer_or_edit(callback, text, reply_markup=_back_main_markup())
 
+    async def _show_topup_queue(target: CallbackQuery, index: int = 0) -> None:
+        async with app.session_factory() as session:
+            pending = await list_pending_topups(session)
+        if not pending:
+            await answer_or_edit(
+                target,
+                "<b>📥 Заявки на пополнение</b>\n\nАктивных заявок нет.",
+                reply_markup=_back_main_markup(),
+            )
+            return
+        normalized_index = max(0, min(index, len(pending) - 1))
+        pending_ids = [item.id for item in pending]
+        current = pending[normalized_index]
+        await answer_or_edit(
+            target,
+            _render_topup_text(current, normalized_index, len(pending)),
+            reply_markup=_topup_view_markup(current, pending_ids, normalized_index),
+        )
+
+    @router.callback_query(F.data == "admin:topups")
+    @router.callback_query(F.data.startswith("admin:topups:show:"))
+    async def admin_topups_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        index = 0
+        if callback.data.startswith("admin:topups:show:"):
+            index = int(callback.data.split(":")[-1])
+        await callback.answer()
+        await _show_topup_queue(callback, index)
+
+    @router.callback_query(F.data.startswith("admin:topup:approve:"))
+    async def admin_topup_approve_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        topup_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            topup = await get_topup_by_id(session, topup_id)
+            if topup is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Заявка не найдена.", reply_markup=_back_main_markup())
+                return
+            if topup.status != TopupStatus.PENDING:
+                await callback.answer()
+                await answer_or_edit(callback, "⚠️ Эта заявка уже обработана.", reply_markup=_back_main_markup())
+                return
+            transaction = await credit_balance(
+                session,
+                user_id=topup.user_id,
+                amount=topup.amount,
+                tx_type=BalanceTransactionType.TOPUP,
+                source="topup",
+                source_id=topup.id,
+            )
+            await approve_topup(session, topup, callback.from_user.id)
+            await session.commit()
+            user = topup.user
+            new_balance = transaction.balance_after
+        await callback.answer("Баланс пополнен")
+        if user is not None:
+            await _send_user_message(
+                user.telegram_id,
+                "✅ Баланс пополнен\n\n"
+                f"💰 Зачислено: {format_money(topup.amount, 'сум')}\n"
+                f"💳 Ваш новый баланс: {format_money(new_balance, 'сум')}\n\n"
+                "Теперь вы можете оформить покупку.",
+            )
+        await _show_topup_queue(callback, 0)
+
+    @router.callback_query(F.data.startswith("admin:topup:reject:"))
+    async def admin_topup_reject_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        topup_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            topup = await get_topup_by_id(session, topup_id)
+            if topup is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Заявка не найдена.", reply_markup=_back_main_markup())
+                return
+            if topup.status != TopupStatus.PENDING:
+                await callback.answer()
+                await answer_or_edit(callback, "⚠️ Эта заявка уже обработана.", reply_markup=_back_main_markup())
+                return
+            await reject_topup(session, topup, callback.from_user.id)
+            await session.commit()
+            user = topup.user
+        await callback.answer("Заявка отклонена")
+        if user is not None:
+            await _send_user_message(
+                user.telegram_id,
+                "❌ Заявка на пополнение отклонена\n\n"
+                f"💰 Сумма: {format_money(topup.amount, 'сум')}\n"
+                f"💳 Способ: {topup.payment_method}\n\n"
+                "Если вы уже оплатили, свяжитесь с поддержкой.",
+            )
+        await _show_topup_queue(callback, 0)
+
     @router.callback_query(F.data == "admin:orders")
     @router.callback_query(F.data.startswith("admin:orders:"))
     async def admin_orders_handler(callback: CallbackQuery) -> None:
@@ -366,7 +616,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
         )
 
-    @router.callback_query(F.data.startswith("admin:order:"))
+    @router.callback_query(F.data.regexp(r"^admin:order:\d+$"))
     async def admin_order_detail_handler(callback: CallbackQuery) -> None:
         if not _guard(callback.from_user.id):
             await callback.answer()
@@ -379,6 +629,70 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
             await answer_or_edit(callback, "Заказ не найден.", reply_markup=_back_main_markup())
             return
         await answer_or_edit(callback, _render_order_text(order), reply_markup=_order_actions_markup(order))
+
+    @router.callback_query(F.data.startswith("admin:order:deliver:"))
+    async def admin_order_delivery_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        order_id = int(callback.data.split(":")[-1])
+        await state.set_state(AdminState.waiting_order_delivery)
+        await state.update_data(order_id=order_id)
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            "Отправьте данные выполнения заказа: код, инструкцию, ссылку активации или описание услуги.",
+            reply_markup=_back_main_markup(),
+        )
+
+    @router.callback_query(F.data.startswith("admin:order:refund:"))
+    async def admin_order_refund_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        order_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            order = await get_order_by_id(session, order_id)
+            if order is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Заказ не найден.", reply_markup=_back_main_markup())
+                return
+            result = await refund_order(session, order=order, admin_id=callback.from_user.id)
+            await session.commit()
+            language = await _user_lang(session, order)
+        if not result.ok:
+            await callback.answer()
+            await answer_or_edit(callback, "⚠️ Этот заказ уже обработан.", reply_markup=_back_main_markup())
+            return
+        await callback.answer("Возврат выполнен")
+        if result.user is not None:
+            await _send_user_message(
+                result.user.telegram_id,
+                "↩️ Заказ отменён\n\n"
+                f"💎 Сервис: {escape(order.service_name_snapshot or order.product_name_snapshot)}\n"
+                f"📦 Тип: {escape(order.product_type_snapshot or '-')}\n"
+                f"💰 Возврат на баланс: {format_money(order.amount, 'сум')}\n"
+                f"💳 Текущий баланс: {format_money(result.user.balance, 'сум')}",
+                reply_markup=_user_menu_markup(language),
+            )
+        await answer_or_edit(callback, _render_order_text(order), reply_markup=_order_actions_markup(order))
+
+    @router.callback_query(F.data.startswith("admin:order:message:"))
+    async def admin_order_message_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        order_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            order = await get_order_by_id(session, order_id)
+            if order is None or order.user is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Клиент не найден.", reply_markup=_back_main_markup())
+                return
+        await state.set_state(AdminState.waiting_user_message)
+        await state.update_data(user_id=order.user_id, return_callback=f"admin:order:{order_id}")
+        await callback.answer()
+        await answer_or_edit(callback, "Введите сообщение для клиента.", reply_markup=_back_main_markup())
 
     @router.callback_query(F.data.startswith("admin:approve:"))
     async def admin_approve_order_handler(callback: CallbackQuery) -> None:
@@ -607,7 +921,7 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         async with app.session_factory() as session:
             products = list((await session.scalars(select(Product).order_by(Product.sort_order, Product.id))).all())
         await callback.answer()
-        await answer_or_edit(callback, "<b>Товары</b>", reply_markup=_product_list_markup(products))
+        await answer_or_edit(callback, "<b>💎 Товары / тарифы</b>", reply_markup=_product_list_markup(products))
 
     @router.callback_query(F.data.regexp(r"^admin:product:\d+$"))
     async def admin_product_detail_handler(callback: CallbackQuery) -> None:
@@ -1149,6 +1463,351 @@ def build_admin_router(app: AppContext, bot: Bot) -> Router:
         await callback.answer("Удалено")
         callback.data = f"admin:layout:{layout_id}"
         await admin_layout_detail_handler(callback)
+
+    @router.callback_query(F.data == "admin:users")
+    async def admin_users_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        await state.set_state(AdminState.waiting_user_lookup)
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            "<b>👤 Пользователи</b>\n\nОтправьте username, Telegram ID или внутренний ID пользователя.",
+            reply_markup=_back_main_markup(),
+        )
+
+    @router.callback_query(F.data.startswith("admin:user:view:"))
+    async def admin_user_view_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        user_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            user = await get_user_by_id(session, user_id)
+            if user is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Пользователь не найден.", reply_markup=_back_main_markup())
+                return
+            orders_count = await count_orders_for_user(session, user.id)
+        await callback.answer()
+        await answer_or_edit(callback, _admin_user_text(user, orders_count), reply_markup=_admin_user_markup(user.id))
+
+    @router.callback_query(F.data.startswith("admin:user:adjust:"))
+    async def admin_user_adjust_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        _, _, _, user_id, mode = callback.data.split(":")
+        await state.set_state(AdminState.waiting_balance_adjustment)
+        await state.update_data(user_id=int(user_id), adjustment_mode=mode)
+        prompt = "Введите сумму пополнения в сумах." if mode == "add" else "Введите сумму списания в сумах."
+        await callback.answer()
+        await answer_or_edit(callback, prompt, reply_markup=_back_main_markup())
+
+    @router.callback_query(F.data.startswith("admin:user:message:"))
+    async def admin_user_message_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        user_id = int(callback.data.split(":")[-1])
+        await state.set_state(AdminState.waiting_user_message)
+        await state.update_data(user_id=user_id, return_callback=f"admin:user:view:{user_id}")
+        await callback.answer()
+        await answer_or_edit(callback, "Введите сообщение для клиента.", reply_markup=_back_main_markup())
+
+    @router.callback_query(F.data == "admin:inventory")
+    async def admin_inventory_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        async with app.session_factory() as session:
+            products = await list_inventory_products(session)
+        await callback.answer()
+        await answer_or_edit(callback, "<b>📦 Готовые доступы</b>\n\nВыберите сервис:", reply_markup=_inventory_products_markup(products))
+
+    @router.callback_query(F.data.startswith("admin:inventory:product:"))
+    async def admin_inventory_product_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        product_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            product = await get_product(session, product_id)
+            if product is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Товар не найден.", reply_markup=_back_main_markup())
+                return
+            summary = await get_inventory_summary(session, product_id)
+        text = (
+            f"<b>📦 {escape(service_name(product, 'ru'))} — готовые доступы</b>\n\n"
+            f"📦 Всего добавлено: {summary['total_count']}\n"
+            f"✅ Доступно: {summary['available_count']}\n"
+            f"🛒 Продано: {summary['sold_count']}\n"
+            f"⏳ Зарезервировано: {summary['reserved_count']}\n"
+            f"🗑 Удалено: {summary['deleted_count']}"
+        )
+        await callback.answer()
+        await answer_or_edit(callback, text, reply_markup=_inventory_product_markup(product_id))
+
+    @router.callback_query(F.data.startswith("admin:inventory:add:"))
+    async def admin_inventory_add_prompt_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        product_id = int(callback.data.split(":")[-1])
+        await state.set_state(AdminState.waiting_inventory_item)
+        await state.update_data(product_id=product_id)
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            "➕ Добавление готового доступа\n\nОтправьте данные товара в формате:\n\nНазвание:\nКод / доступ:\nИнструкция:",
+            reply_markup=_back_main_markup(),
+        )
+
+    @router.callback_query(F.data.startswith("admin:inventory:list:"))
+    async def admin_inventory_list_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        product_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            product = await get_product(session, product_id)
+            items = await list_inventory_items(session, product_id=product_id, limit=30)
+        if product is None:
+            await callback.answer()
+            await answer_or_edit(callback, "Товар не найден.", reply_markup=_back_main_markup())
+            return
+        lines = [f"<b>📋 {escape(service_name(product, 'ru'))}</b>", ""]
+        if not items:
+            lines.append("Доступов пока нет.")
+        else:
+            for item in items:
+                lines.append(f"#{item.id} • {escape(item.title or 'Доступ')} • {item.status.value}")
+        await callback.answer()
+        await answer_or_edit(
+            callback,
+            "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:inventory:product:{product_id}")]]
+            ),
+        )
+
+    @router.callback_query(F.data.startswith("admin:inventory:delete_list:"))
+    async def admin_inventory_delete_list_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        product_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            items = await list_inventory_items(session, product_id=product_id, limit=30)
+        available_items = [item for item in items if item.status.value == "available"]
+        await callback.answer()
+        if not available_items:
+            await answer_or_edit(
+                callback,
+                "Нет доступных позиций для удаления.",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text="⬅️ Назад", callback_data=f"admin:inventory:product:{product_id}")]]
+                ),
+            )
+            return
+        await answer_or_edit(callback, "<b>🗑 Выберите доступ для удаления</b>", reply_markup=_inventory_delete_markup(product_id, available_items))
+
+    @router.callback_query(F.data.startswith("admin:inventory:delete:"))
+    async def admin_inventory_delete_handler(callback: CallbackQuery) -> None:
+        if not _guard(callback.from_user.id):
+            await callback.answer()
+            return
+        item_id = int(callback.data.split(":")[-1])
+        async with app.session_factory() as session:
+            item = await get_inventory_item(session, item_id)
+            if item is None:
+                await callback.answer()
+                await answer_or_edit(callback, "Доступ не найден.", reply_markup=_back_main_markup())
+                return
+            product_id = item.product_id
+            await soft_delete_inventory_item(session, item)
+            await session.commit()
+        await callback.answer("Удалено")
+        callback.data = f"admin:inventory:product:{product_id}"
+        await admin_inventory_product_handler(callback)
+
+    @router.message(AdminState.waiting_user_lookup)
+    async def admin_user_lookup_message_handler(message: Message, state: FSMContext) -> None:
+        if not _guard(message.from_user.id):
+            return
+        async with app.session_factory() as session:
+            users = await find_users(session, message.text or "", limit=10)
+        if not users:
+            await message.answer("Пользователи не найдены.")
+            return
+        rows = [
+            [
+                InlineKeyboardButton(
+                    text=f"{user_display_name(user)} • {format_money(user.balance, 'сум')}",
+                    callback_data=f"admin:user:view:{user.id}",
+                )
+            ]
+            for user in users
+        ]
+        rows.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="admin:main")])
+        await state.clear()
+        await message.answer("<b>Результаты поиска</b>", reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
+
+    @router.message(AdminState.waiting_balance_adjustment)
+    async def admin_balance_adjustment_message_handler(message: Message, state: FSMContext) -> None:
+        if not _guard(message.from_user.id):
+            return
+        data = await state.get_data()
+        amount = _parse_amount(message.text)
+        if amount is None:
+            await message.answer("Введите сумму числом больше нуля.")
+            return
+        delta = amount if data.get("adjustment_mode") == "add" else -amount
+        async with app.session_factory() as session:
+            user = await get_user_by_id(session, int(data["user_id"]))
+            if user is None:
+                await message.answer("Пользователь не найден.")
+                await state.clear()
+                return
+            transaction = await apply_admin_adjustment(
+                session,
+                user_id=user.id,
+                delta=delta,
+                source="admin_adjustment",
+                source_id=message.from_user.id,
+            )
+            if transaction is None:
+                await message.answer("Недостаточно средств на балансе клиента.")
+                return
+            await session.commit()
+            orders_count = await count_orders_for_user(session, user.id)
+            sign = "+" if delta > 0 else "-"
+            change_text = format_money(abs(delta), "сум")
+        await state.clear()
+        await _send_user_message(
+            user.telegram_id,
+            "🛠 Баланс изменён администратором\n\n"
+            f"Изменение: {sign}{change_text}\n"
+            f"Новый баланс: {format_money(user.balance, 'сум')}",
+        )
+        await message.answer(_admin_user_text(user, orders_count), reply_markup=_admin_user_markup(user.id))
+
+    @router.message(AdminState.waiting_user_message)
+    async def admin_user_message_handler(message: Message, state: FSMContext) -> None:
+        if not _guard(message.from_user.id):
+            return
+        data = await state.get_data()
+        async with app.session_factory() as session:
+            user = await get_user_by_id(session, int(data["user_id"]))
+        if user is None:
+            await message.answer("Пользователь не найден.")
+            await state.clear()
+            return
+        await _send_user_message(user.telegram_id, message.text or "")
+        await state.clear()
+        await message.answer("Сообщение отправлено клиенту.")
+
+    @router.message(AdminState.waiting_inventory_item)
+    async def admin_inventory_item_message_handler(message: Message, state: FSMContext) -> None:
+        if not _guard(message.from_user.id):
+            return
+        data = await state.get_data()
+        text = (message.text or "").strip()
+        if not text:
+            await message.answer("Отправьте текст с данными доступа.")
+            return
+
+        title_lines: list[str] = []
+        content_lines: list[str] = []
+        instruction_lines: list[str] = []
+        bucket = None
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            normalized = line.lower().rstrip(":")
+            if normalized in {"название", "title"}:
+                bucket = "title"
+                continue
+            if normalized in {"код / доступ", "код/доступ", "код", "доступ", "content"}:
+                bucket = "content"
+                continue
+            if normalized in {"инструкция", "instruction"}:
+                bucket = "instruction"
+                continue
+            if bucket == "title":
+                title_lines.append(raw_line)
+            elif bucket == "content":
+                content_lines.append(raw_line)
+            elif bucket == "instruction":
+                instruction_lines.append(raw_line)
+
+        title = "\n".join(title_lines).strip()
+        content = "\n".join(content_lines).strip()
+        instruction = "\n".join(instruction_lines).strip()
+        if not title or not content:
+            await message.answer("Нужны как минимум поля «Название» и «Код / доступ».")
+            return
+
+        async with app.session_factory() as session:
+            product = await get_product(session, int(data["product_id"]))
+            if product is None:
+                await message.answer("Товар не найден.")
+                await state.clear()
+                return
+            await add_inventory_item(
+                session,
+                product_id=product.id,
+                title=title,
+                content=content,
+                instruction=instruction,
+            )
+            await session.commit()
+        await state.clear()
+        await message.answer(
+            "✅ Готовый доступ добавлен\n\n"
+            f"💎 Сервис: {service_name(product, 'ru')}\n"
+            "📦 Тип: Готовый доступ\n"
+            "📌 Статус: Доступен"
+        )
+
+    @router.message(AdminState.waiting_order_delivery)
+    async def admin_order_delivery_message_handler(message: Message, state: FSMContext) -> None:
+        if not _guard(message.from_user.id):
+            return
+        delivery_content = (message.text or "").strip()
+        if not delivery_content:
+            await message.answer("Отправьте текст с данными заказа.")
+            return
+        data = await state.get_data()
+        async with app.session_factory() as session:
+            order = await get_order_by_id(session, int(data["order_id"]))
+            if order is None:
+                await message.answer("Заказ не найден.")
+                await state.clear()
+                return
+            await complete_order_delivery(
+                session,
+                order,
+                delivery_content=delivery_content,
+                admin_id=message.from_user.id,
+            )
+            await session.commit()
+            language = await _user_lang(session, order)
+        await state.clear()
+        if order.user is not None:
+            await _send_user_message(
+                order.user.telegram_id,
+                "✅ Ваш заказ подтверждён\n\n"
+                f"💎 Сервис: {escape(order.service_name_snapshot or order.product_name_snapshot)}\n"
+                f"📦 Тип: {escape(order.product_type_snapshot or '-')}\n"
+                f"💰 Оплачено: {format_money(order.amount, 'сум')}\n\n"
+                "Данные по заказу:\n"
+                f"{escape(delivery_content)}\n\n"
+                "Спасибо за покупку!",
+                reply_markup=_user_order_markup(language, order),
+            )
+        await message.answer("Заказ выполнен и отправлен клиенту.")
 
     @router.message(AdminState.waiting_product_create)
     async def admin_product_create_message_handler(message: Message, state: FSMContext) -> None:

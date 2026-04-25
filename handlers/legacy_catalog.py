@@ -95,6 +95,16 @@ def _chatgpt_variant_markup(language: str, personal_product, ready_product) -> I
     ready_price = _sum_text(ready_product.price if ready_product is not None else 49000)
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [InlineKeyboardButton(text=f"👤 Личный аккаунт — {personal_price}", callback_data="buy_chatgpt_1m", style="success")],
+            [InlineKeyboardButton(text=f"📦 Готовый аккаунт — {ready_price}", callback_data=ready_callback, style="success")],
+            [
+                InlineKeyboardButton(text=ui_text(language, "btn_back"), callback_data="open_chatgpt", style="danger"),
+                InlineKeyboardButton(text=ui_text(language, "btn_menu"), callback_data="menu:main"),
+            ],
+        ]
+    )
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
             [InlineKeyboardButton(text="👤 Личный аккаунт — 79 000 сум", callback_data="buy_chatgpt_1m", style="success")],
             [InlineKeyboardButton(text="📦 Готовый аккаунт — 49 000 сум", callback_data=ready_callback, style="success")],
             [
@@ -348,13 +358,14 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     async def chatgpt_1m_handler(callback: CallbackQuery, state: FSMContext) -> None:
         async with app.session_factory() as session:
             language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
+            personal_product = await get_product_by_code(session, "chatgpt_plus_month")
             ready_product = await get_product_by_code(session, "chatgpt_ready_month")
         await state.clear()
         await callback.answer()
         await answer_or_edit(
             callback,
             "<tg-emoji emoji-id='5359726582447487916'>🤖</tg-emoji> ChatGPT Pro\n\nВыберите вариант подключения:",
-            reply_markup=_chatgpt_variant_markup(language, ready_product),
+            reply_markup=_chatgpt_variant_markup(language, personal_product, ready_product),
         )
 
     @router.callback_query(F.data == "capcut_1m")
@@ -770,7 +781,9 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     @router.callback_query(F.data.startswith("checkout:cancel:"))
     async def checkout_cancel_handler(callback: CallbackQuery) -> None:
         checkout_id = int(callback.data.split(":")[-1])
+        language = "ru"
         async with app.session_factory() as session:
+            language = await get_user_language(session, callback.from_user.id, app.settings.default_language)
             checkout = await get_checkout_session(session, checkout_id)
             if checkout is not None and checkout.status == CheckoutSessionStatus.PENDING:
                 await cancel_checkout_session(session, checkout)
@@ -779,7 +792,7 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
         await answer_or_edit(
             callback,
             "❌ Покупка отменена\n\nДеньги с баланса не списаны.",
-            reply_markup=build_menu_only_markup("ru"),
+            reply_markup=build_menu_only_markup(language),
         )
 
     @router.callback_query(F.data.startswith("product:view:"))
@@ -804,6 +817,12 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
     @router.callback_query(F.data == "product:trial")
     async def legacy_trial_alias_handler(callback: CallbackQuery, state: FSMContext) -> None:
         await chatgpt_trial_handler(callback, state)
+
+    @router.callback_query(F.data.startswith("product:variant:"))
+    async def legacy_product_variant_handler(callback: CallbackQuery, state: FSMContext) -> None:
+        product_id = int(callback.data.split(":")[-1])
+        callback.data = f"product:buy:{product_id}"
+        await legacy_product_buy_handler(callback, state)
 
     @router.callback_query(F.data.startswith("product:buy:"))
     async def legacy_product_buy_handler(callback: CallbackQuery, state: FSMContext) -> None:
