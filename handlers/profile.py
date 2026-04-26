@@ -210,6 +210,10 @@ def _profile_text(user, orders_count: int, language: str) -> str:
     )
 
 
+def build_profile_overview_text(user, orders_count: int, language: str) -> str:
+    return _profile_text(user, orders_count, language)
+
+
 def _orders_markup(orders: list, language: str) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"{order_display_number(order)} • {order.product_name_snapshot}", callback_data=f"order:detail:{order.id}")]
@@ -493,7 +497,7 @@ def build_profile_router(app: AppContext, bot: Bot) -> Router:
         await callback.answer()
         await answer_or_edit(
             callback,
-            _profile_text(user, orders_count, language),
+            build_profile_overview_text(user, orders_count, language),
             reply_markup=profile_markup(language, app.settings.support_url),
         )
 
