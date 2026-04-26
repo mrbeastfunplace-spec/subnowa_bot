@@ -17,7 +17,6 @@ from handlers.common import (
     product_markup,
     products_markup,
 )
-from handlers.profile import build_profile_overview_text
 from services.capcut import count_free_accounts
 from services.catalog import category_name, get_category, get_product, get_product_by_code, list_categories, list_category_products, render_product_text
 from services.context import AppContext
@@ -25,7 +24,7 @@ from services.orders import attach_payment_method, change_status, create_custom_
 from services.payments import get_payment_method, list_product_payment_methods, payment_instruction
 from services.settings import get_setting
 from services.texts import format_text
-from services.users import count_orders_for_user, get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
+from services.users import get_last_chatgpt_gmail, get_user_by_telegram_id, get_user_language, touch_user, user_has_trial
 from states import UserFlowState
 from utils.formatting import order_display_number, user_display_name
 from utils.messages import answer_or_edit
@@ -433,12 +432,10 @@ def build_catalog_router(app: AppContext, bot: Bot) -> Router:
             await state.clear()
             await message.answer(invalid_text)
             if return_to == "profile":
-                user = await get_user_by_telegram_id(session, message.from_user.id)
-                if user is None:
-                    return
-                orders_count = await count_orders_for_user(session, user.id)
+                title = await format_text(session, "user.profile_title", language, fallback="Ваш профиль")
+                display_name = escape(user_display_name(message.from_user, message.from_user.id))
                 await message.answer(
-                    build_profile_overview_text(user, orders_count, language),
+                    f"<b>{title}</b>\n\nПользователь: <b>{display_name}</b>\nID: <code>{message.from_user.id}</code>",
                     reply_markup=profile_markup(language, app.settings.support_url),
                 )
                 return
