@@ -119,12 +119,12 @@ def _promo_success_text(language: str, new_balance) -> str:
     if language == "en":
         return (
             "✅ Promo code activated\n\n"
-            "💰 20 000 UZS has been added to your balance\n"
+            "💰 70 000 UZS has been added to your balance\n"
             f"💳 New balance: {balance_text}"
         )
     return (
         "✅ Промокод активирован\n\n"
-        "💰 На ваш баланс зачислено: 20 000 сум\n"
+        "💰 На ваш баланс зачислено: 70 000 сум\n"
         f"💳 Ваш новый баланс: {balance_text}"
     )
 
@@ -316,18 +316,18 @@ def _promo_success_text(language: str, new_balance) -> str:
     if language == "uz":
         return (
             "✅ Promokod faollashtirildi\n\n"
-            "💰 Balansingizga 20 000 so'm qo'shildi\n"
+            "💰 Balansingizga 70 000 so'm qo'shildi\n"
             f"💳 Yangi balans: {balance_text}"
         )
     if language == "en":
         return (
             "✅ Promo code activated\n\n"
-            "💰 20 000 UZS has been added to your balance\n"
+            "💰 70 000 UZS has been added to your balance\n"
             f"💳 New balance: {balance_text}"
         )
     return (
         "✅ Промокод активирован\n\n"
-        "💰 На ваш баланс зачислено: 20 000 сум\n"
+        "💰 На ваш баланс зачислено: 70 000 сум\n"
         f"💳 Ваш новый баланс: {balance_text}"
     )
 
